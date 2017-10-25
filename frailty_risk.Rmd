@@ -1,14 +1,17 @@
 ---
 title: "Clinical Risk Factors for Long-Term Frailty"
+author: "Jennifer Thompson, MPH; Supervisor: Rameela Chandrasekhar, PhD"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
   html_notebook:
     code_folding: hide
     toc: yes
     toc_float: yes
     toc_depth: 2
+    theme: cosmo
 ---
 
-Using the BRAIN-ICU cohort, which collected the [CSHA Clinical Frailty Score](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1188185/) both prior to ICU admission and at three and twelve months following hospital discharge, we will examine several baseline and in-ICU covariates as potential risk factors for long-term frailty.
+Using the BRAIN-ICU cohort, which collected the [CSHA Clinical Frailty Score](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1188185/) (CFS) both prior to ICU admission and at three and twelve months following hospital discharge, we will examine several baseline and in-ICU covariates as potential risk factors for long-term frailty.
 
 ```{r setup}
 ## Set default options
@@ -25,9 +28,141 @@ suppressPackageStartupMessages(library(stringr))
 suppressPackageStartupMessages(library(sparkline))
 suppressPackageStartupMessages(library(plotly))
 suppressPackageStartupMessages(library(JTHelpers))
+suppressPackageStartupMessages(library(captioner))
 
 ## Analysis data sets are stored in parent directory (actually two levels above)
 load("..//..//braindata.Rdata")
+
+```
+
+```{r tables_figs}
+table_nums <- captioner(prefix = "Table")
+table_nums(
+  name = "describe_all",
+  caption = "Description of All Patients with 3 and/or 12m Frailty Data"
+)
+table_nums(
+  name = "describe_3m",
+  caption = "Description of Patients with 3m Frailty Data by 3m CFS"
+)
+table_nums(
+  name = "describe_12m",
+  caption = "Description of Patients with 12m Frailty Data by 12m CFS"
+)
+
+figure_nums <- captioner(prefix = "Figure")
+figure_nums(name = "spaghetti", caption = "CSHA Frailty Scores Over Time")
+
+```
+
+```{r data_prep}
+## -- Get IDs of those w/ at least partial assessment data at 3 and/or 12m -----
+fu_outcomes <- c("rbans.global.score", "rbans.attention.tscore",
+                 "rbans.delayedmem.tscore", "rbans.immmemory.tscore",
+                 "rbans.language.tscore", "rbans.visuo.tscore",
+                 "trail.b.tscore", "trail.a.tscore", "mmse.tscore", "sf36.mcs",
+                 "sf36.pcs", "adl.totscore", "faq.totscore", "bdi.totscore",
+                 "pcl.totscore", "caps.score", "frailty.fu")
+
+brain.fu$any_fu <- rowSums(!is.na(brain.fu[, fu_outcomes])) > 0
+
+pts_3m <- subset(brain.fu, fu.period == "3 Month" & any_fu)$id
+pts_12m <- subset(brain.fu, fu.period == "12 Month" & any_fu)$id
+pts_fu <- union(pts_3m, pts_12m)
+
+## -- Create frailty *categories* at 3m, 12m and add to brain.oneobs -----------
+brain.fu$frailty.cat <- with(brain.fu, {
+  factor(ifelse(is.na(frailty.fu), NA,
+         ifelse(frailty.fu %in%
+                  c("1. Very Fit",
+                    "2. Well",
+                    "3. Well, with treated co-morbid ds"),
+                1,
+         ifelse(frailty.fu %in% c("4. Apparently Vulnerable"), 2, 3))),
+         levels = 1:3,
+         labels = c("CFS = 1, 2, 3", "CFS = 4", "CFS = 5, 6, 7"))
+})
+
+fu_frailty <- brain.fu %>%
+  dplyr::select(id, fu.period, frailty.fu, frailty.cat) %>%
+  filter(fu.period %in% c("3 Month", "12 Month")) %>%
+  mutate(fu.period = str_extract(fu.period, "^[0-9]+")) %>%
+  gather(key = frailty_var, value = frailty_val, frailty.fu:frailty.cat) %>%
+  unite(col = "frailty_var", frailty_var, fu.period, sep = ".") %>%
+  spread(key = frailty_var, value = frailty_val)
+
+brain.oneobs <- merge(brain.oneobs, fu_frailty, by = "id", all.x = TRUE)
+
+```
+
+# Description of Cohort
+
+We'll describe the cohort in two ways:
+
+1. Baseline and in-hospital characteristics of any patient with at least some followup assessment data available at 3- and/or 12-month followup (`r table_nums("describe_all", cite = TRUE)`)
+2. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", cite = TRUE)` and `r table_nums("describe_12m", cite = TRUE)`), stratified by CFS at that time point
+
+```{r describe_tables}
+label(brain.oneobs$frailty) <- "CSHA Frailty Score at enrollment"
+label(brain.oneobs$frailty.fu.3) <- "CSHA Frailty Score, 3m"
+label(brain.oneobs$frailty.fu.12) <- "CSHA Frailty Score, 12m"
+label(brain.oneobs$frailty.cat.3) <- "CFS Category, 3m"
+label(brain.oneobs$frailty.cat.12) <- "CFS Category, 12m"
+
+describe_vars <- c("age.enroll", "sex.pp", "frailty", "charlson.score",
+                   "iqcode.score.e", "faq.e", "adl.e", "num.apache",
+                   "mean.sofa.icu", "ever.vent.s", "vent.los.tot.s.eo",
+                   "ever.sevseptic.s", "icudays.sevseptic.eo", "ever.del.s",
+                   "del.s.imp.eo", "ever.coma.s", "coma.s.imp.eo",
+                   "icu.los.tot.s", "hosp.los.s")
+
+describe_all <- summaryM(
+  as.formula(paste(paste(describe_vars, collapse = " + "), "~ 1")),
+  data = subset(brain.oneobs, id %in% pts_fu)
+)
+
+describe_3m <- summaryM(
+  as.formula(paste(
+    paste(c(describe_vars, "frailty.fu.3"), collapse = " + "),
+    "~ frailty.cat.3"
+  )),
+  data = subset(brain.oneobs, id %in% pts_3m & !is.na(frailty.fu.3))
+)
+
+describe_12m <- summaryM(
+  as.formula(paste(
+    paste(c(describe_vars, "frailty.fu.12"), collapse = " + "),
+    "~ frailty.cat.12"
+  )),
+  data = subset(brain.oneobs, id %in% pts_12m & !is.na(frailty.fu.12))
+)
+
+```
+
+## `r table_nums("describe_all")`
+
+```{r print_describe_all}
+html(
+  describe_all, digits = 2, what = "%", long = TRUE, prmsd = TRUE, brmsd = TRUE
+)
+
+```
+
+## `r table_nums("describe_3m")`
+
+```{r print_describe_3m}
+html(
+  describe_3m, digits = 2, what = "%", long = TRUE, prmsd = TRUE, brmsd = TRUE
+)
+
+```
+
+## `r table_nums("describe_12m")`
+
+```{r print_describe_12m}
+html(
+  describe_12m, digits = 2, what = "%", long = TRUE, prmsd = TRUE, brmsd = TRUE
+)
 
 ```
 
