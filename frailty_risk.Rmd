@@ -1,0 +1,85 @@
+---
+title: "Clinical Risk Factors for Long-Term Frailty"
+output:
+  html_notebook:
+    code_folding: hide
+    toc: yes
+    toc_float: yes
+    toc_depth: 2
+---
+
+Using the BRAIN-ICU cohort, which collected the [CSHA Clinical Frailty Score](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1188185/) both prior to ICU admission and at three and twelve months following hospital discharge, we will examine several baseline and in-ICU covariates as potential risk factors for long-term frailty.
+
+```{r setup}
+## Set default options
+knitr::opts_chunk$set(echo = TRUE, results = "hide", warning = FALSE, message = FALSE)
+options(width = 100)
+
+## Load libraries
+# suppressPackageStartupMessages(library(huxtable))
+suppressPackageStartupMessages(library(rms))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(stringr))
+# suppressPackageStartupMessages(library(forcats))
+# suppressPackageStartupMessages(library(naniar))
+suppressPackageStartupMessages(library(sparkline))
+suppressPackageStartupMessages(library(plotly))
+suppressPackageStartupMessages(library(JTHelpers))
+
+## Analysis data sets are stored in parent directory (actually two levels above)
+load("..//..//braindata.Rdata")
+
+```
+
+# Trajectory of Frailty over Time
+
+This spaghetti plot was used to explore data in preparation for mixed effects models and/or latent class analysis. It is left in the report in case it's of interest.
+
+```{r describe_frailty}
+## -- Spaghetti plot for frailty at all three time points ----------------------
+
+## Function: given a dataset, extract frailty variable and patient ID and give
+## consistent names; I *know* that the variables I want are named "frailty" and
+## "frailty.fu", and that there are no other variables that start with "frailty"
+extract_frailty <- function(df, timept){
+  dplyr::select(df, id, matches("^frailty")) %>%
+    rename(frailty = !!names(.[2])) %>%
+    mutate(time = timept)
+}
+
+frailty_data <- map2_dfr(
+  list(brain.oneobs,
+       subset(brain.fu, fu.period == "3 Month"),
+       subset(brain.fu, fu.period == "12 Month")
+  ),
+  c(0, 3, 12),
+  extract_frailty
+) %>%
+  ## Create numeric version of frailty from original character strings
+  mutate(frailty_num = as.numeric(str_sub(frailty, 1, 1)))
+
+## Spaghetti plot
+ggplot(data = frailty_data, aes(x = time, y = frailty_num)) +
+  # geom_smooth(method = "lm") +
+    ## doesn't really add anything; straight line across the middle
+  geom_line(aes(group = id), alpha = 0.1, colour = "#003D79") +
+  theme_minimal() +
+  theme(panel.grid = element_blank()) +
+  scale_x_continuous(name = "",
+                     breaks = c(0, 3, 12),
+                     labels = c("Baseline", "3M", "12M")) +
+  scale_y_continuous(name = "Clinical Frailty Score", breaks = 1:7)
+
+```
+
+# Software Details
+
+All analyses were performed using `r R.version$version.string`. Individual package details are noted below.
+
+<details>
+```{r session_info, results = "markup"}
+devtools::session_info()
+
+```
+
+</details>
