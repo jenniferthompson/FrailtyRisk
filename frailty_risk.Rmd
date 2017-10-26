@@ -51,6 +51,7 @@ table_nums(
 )
 
 figure_nums <- captioner(prefix = "Figure")
+figure_nums(name = "boxplots", caption = "CSHA Frailty Scores by Age at Enrollment")
 figure_nums(name = "spaghetti", caption = "CSHA Frailty Scores Over Time")
 
 ```
@@ -106,8 +107,8 @@ brain.oneobs <- merge(brain.oneobs, fu_frailty, by = "id", all.x = TRUE)
 
 We'll describe the cohort in two ways:
 
-1. Baseline and in-hospital characteristics of any patient with at least some followup assessment data available at 3- and/or 12-month followup (`r table_nums("describe_all", cite = TRUE)`)
-1. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", cite = TRUE)` and `r table_nums("describe_12m", cite = TRUE)`), stratified by CFS at that time point
+1. Baseline and in-hospital characteristics of any patient with at least some followup assessment data available at 3- and/or 12-month followup (`r table_nums("describe_all", display = "cite")`)
+1. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", display = TRUE)` and `r table_nums("describe_12m", display = "cite")`), stratified by CFS at that time point
 
 ```{r describe_tables}
 label(brain.oneobs$frailty) <- "CSHA Frailty Score at enrollment"
@@ -174,6 +175,8 @@ html(
 ```
 
 # Description of Frailty by Age at BRAIN-ICU Enrollment
+
+`r figure_nums("boxplots", display = "cite")` shows raw CFS scores at three and twelve months after hospital discharge by patients' age at BRAIN-ICU admission. Boxplots are overlaid to summarize the data: the middle bar represents the median for each age group; the bottom and top bars represent the 25th and 75th percentiles, respectively. In other words, the middle half of the data is represented by the box.
 
 ```{r boxplot_prep}
 ## -- Need one row per patient per time point, with age category included ------
