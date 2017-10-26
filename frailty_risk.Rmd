@@ -56,6 +56,14 @@ figure_nums(name = "spaghetti", caption = "CSHA Frailty Scores Over Time")
 ```
 
 ```{r data_prep}
+## -- Create age category ------------------------------------------------------
+brain.oneobs <- brain.oneobs %>%
+  mutate(age.cat = factor(ifelse(is.na(age.enroll), NA,
+                          ifelse(age.enroll < 50, 1,
+                          ifelse(age.enroll < 65, 2, 3))),
+                          levels = 1:3,
+                          labels = c("<50", "50-64", ">=65")))
+
 ## -- Get IDs of those w/ at least partial assessment data at 3 and/or 12m -----
 fu_outcomes <- c("rbans.global.score", "rbans.attention.tscore",
                  "rbans.delayedmem.tscore", "rbans.immmemory.tscore",
@@ -71,17 +79,16 @@ pts_12m <- subset(brain.fu, fu.period == "12 Month" & any_fu)$id
 pts_fu <- union(pts_3m, pts_12m)
 
 ## -- Create frailty *categories* at 3m, 12m and add to brain.oneobs -----------
-brain.fu$frailty.cat <- with(brain.fu, {
-  factor(ifelse(is.na(frailty.fu), NA,
-         ifelse(frailty.fu %in%
-                  c("1. Very Fit",
-                    "2. Well",
-                    "3. Well, with treated co-morbid ds"),
-                1,
-         ifelse(frailty.fu %in% c("4. Apparently Vulnerable"), 2, 3))),
-         levels = 1:3,
-         labels = c("CFS = 1, 2, 3", "CFS = 4", "CFS = 5, 6, 7"))
-})
+brain.fu <- brain.fu %>%
+  mutate(
+    ## Numeric version of frailty for later use
+    frailty_num = as.numeric(str_sub(frailty.fu, 1, 1)),
+    frailty.cat = factor(ifelse(is.na(frailty_num), NA,
+                         ifelse(frailty_num <= 3, 1,
+                         ifelse(frailty_num == 4, 2, 3))),
+                         levels = 1:3,
+                         labels = c("CFS = 1, 2, 3", "CFS = 4", "CFS = 5, 6, 7"))
+  )
 
 fu_frailty <- brain.fu %>%
   dplyr::select(id, fu.period, frailty.fu, frailty.cat) %>%
@@ -100,7 +107,7 @@ brain.oneobs <- merge(brain.oneobs, fu_frailty, by = "id", all.x = TRUE)
 We'll describe the cohort in two ways:
 
 1. Baseline and in-hospital characteristics of any patient with at least some followup assessment data available at 3- and/or 12-month followup (`r table_nums("describe_all", cite = TRUE)`)
-2. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", cite = TRUE)` and `r table_nums("describe_12m", cite = TRUE)`), stratified by CFS at that time point
+1. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", cite = TRUE)` and `r table_nums("describe_12m", cite = TRUE)`), stratified by CFS at that time point
 
 ```{r describe_tables}
 label(brain.oneobs$frailty) <- "CSHA Frailty Score at enrollment"
@@ -166,6 +173,31 @@ html(
 
 ```
 
+# Description of Frailty by Age at BRAIN-ICU Enrollment
+
+```{r boxplot_prep}
+## -- Need one row per patient per time point, with age category included ------
+fu_plotdf <- brain.fu %>%
+  filter(fu.period %in% paste(c(3, 12), "Month")) %>%
+  dplyr::select(id, fu.period, frailty_num) %>%
+  mutate(timept = factor(ifelse(fu.period == "3 Month", 1, 2),
+                         levels = 1:2, labels = c("3 Months", "12 Months"))) %>%
+  left_join(dplyr::select(brain.oneobs, id, age.cat), by = "id")
+
+ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
+  facet_wrap(~ timept, nrow = 1) +
+  geom_point(colour = "#003D79", alpha = 0.15,
+             position = position_jitter(width = 0.25, height = 0.2)) +
+  geom_boxplot(colour = "#002346", fill = NA) +
+  scale_x_discrete(name = "Age at Enrollment") +
+  scale_y_continuous(name = "CSHA Clinical Frailty Score", breaks = 1:7) +
+  theme_minimal() +
+  theme(strip.background = element_rect(fill = "grey90"),
+        strip.text = element_text(face = "bold"),
+        panel.border = element_rect(colour = "grey80", fill = NA))
+
+```
+
 # Trajectory of Frailty over Time
 
 This spaghetti plot was used to explore data in preparation for mixed effects models and/or latent class analysis. It is left in the report in case it's of interest.
@@ -177,7 +209,7 @@ This spaghetti plot was used to explore data in preparation for mixed effects mo
 ## consistent names; I *know* that the variables I want are named "frailty" and
 ## "frailty.fu", and that there are no other variables that start with "frailty"
 extract_frailty <- function(df, timept){
-  dplyr::select(df, id, matches("^frailty")) %>%
+  dplyr::select(df, id, matches("^frailty[\\.fu]*$")) %>%
     rename(frailty = !!names(.[2])) %>%
     mutate(time = timept)
 }
