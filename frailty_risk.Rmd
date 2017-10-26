@@ -57,13 +57,16 @@ figure_nums(name = "spaghetti", caption = "CSHA Frailty Scores Over Time")
 ```
 
 ```{r data_prep}
-## -- Create age category ------------------------------------------------------
+## -- Create age category, dichotomous discharge location variables ------------
 brain.oneobs <- brain.oneobs %>%
   mutate(age.cat = factor(ifelse(is.na(age.enroll), NA,
                           ifelse(age.enroll < 50, 1,
                           ifelse(age.enroll < 65, 2, 3))),
                           levels = 1:3,
-                          labels = c("<50", "50-64", ">=65")))
+                          labels = c("<50", "50-64", ">=65")),
+         hospdis.home = factor(ifelse(is.na(hospdis.loc), NA,
+                               ifelse(hospdis.loc == "Home", 1, 2)),
+                               levels = 1:2, labels = c("Home", "Facility")))
 
 ## -- Get IDs of those w/ at least partial assessment data at 3 and/or 12m -----
 fu_outcomes <- c("rbans.global.score", "rbans.attention.tscore",
@@ -92,12 +95,14 @@ brain.fu <- brain.fu %>%
   )
 
 fu_frailty <- brain.fu %>%
-  dplyr::select(id, fu.period, frailty.fu, frailty.cat) %>%
+  dplyr::select(id, fu.period, frailty.fu, frailty_num, frailty.cat) %>%
   filter(fu.period %in% c("3 Month", "12 Month")) %>%
   mutate(fu.period = str_extract(fu.period, "^[0-9]+")) %>%
   gather(key = frailty_var, value = frailty_val, frailty.fu:frailty.cat) %>%
   unite(col = "frailty_var", frailty_var, fu.period, sep = ".") %>%
-  spread(key = frailty_var, value = frailty_val)
+  spread(key = frailty_var, value = frailty_val) %>%
+  mutate(frailty_num.3 = as.numeric(frailty_num.3),
+         frailty_num.12 = as.numeric(frailty_num.12))
 
 brain.oneobs <- merge(brain.oneobs, fu_frailty, by = "id", all.x = TRUE)
 
@@ -108,7 +113,7 @@ brain.oneobs <- merge(brain.oneobs, fu_frailty, by = "id", all.x = TRUE)
 We'll describe the cohort in two ways:
 
 1. Baseline and in-hospital characteristics of any patient with at least some followup assessment data available at 3- and/or 12-month followup (`r table_nums("describe_all", display = "cite")`)
-1. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", display = TRUE)` and `r table_nums("describe_12m", display = "cite")`), stratified by CFS at that time point
+1. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", display = "cite")` and `r table_nums("describe_12m", display = "cite")`), stratified by CFS at that time point
 
 ```{r describe_tables}
 label(brain.oneobs$frailty) <- "CSHA Frailty Score at enrollment"
@@ -200,6 +205,180 @@ ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
         panel.border = element_rect(colour = "grey80", fill = NA))
 
 ```
+
+# Risk Factors for Frailty after Critical Illness
+
+Among ICU survivors with at least partial cognitive and functional assessment data available at each followup point, we assessed the following covariates for their potential to be risk factors for increased frailty after critical illness:
+
+Patient characteristics at baseline:
+
+- Age at enrollment
+- Years of education
+- Sex
+- Comorbidities, measured via Charlson score
+- Baseline independence, measured via Katz Activities of Daily Living score
+- Baseline disability, measured via Functional Activities Questionnaire
+
+Characteristics of critical illness:
+
+- Severity of illness during the ICU stay, measured via mean modified SOFA (ignoring GCS) in the ICU
+- Delirium duration
+- Coma duration 
+- Sepsis duration
+- Duration of MV *(for posterity: we went back and forth on ICU LOS vs this)*
+- Discharge location (home vs elsewhere)
+
+```{r model_prep}
+## -- Sparklines to show distribution of CFS -----------------------------------
+cfs_dist_3m <- brain.fu %>%
+  filter(fu.period == "3 Month" & !is.na(frailty_num)) %>%
+  group_by(frailty_num) %>%
+  summarise(count = n())
+
+spark_cfs_3m <- sparkline(
+  cfs_dist_3m$count,
+  type = 'bar',
+  barColor = "#003D74",
+  elementId = "sparkline-3m",
+  width = 35
+)
+
+cfs_dist_12m <- brain.fu %>%
+  filter(fu.period == "12 Month" & !is.na(frailty_num)) %>%
+  group_by(frailty_num) %>%
+  summarise(count = n())
+
+spark_cfs_12m <- sparkline(
+  cfs_dist_12m$count,
+  type = 'bar',
+  barColor = "#003D74",
+  elementId = "sparkline-12m",
+  width = 35
+)
+
+## -- Data sets for modeling ---------------------------------------------------
+## Vector of model covariates
+model_covars <- c("age.enroll", "edu", "sex.pp", "charlson.score", "adl.e",
+                  "faq.e", "mean.modsofa.icu", "del.s.imp", "coma.s.imp",
+                  "icudays.sevseptic.s", "vent.los.tot.s", "hospdis.home")
+## Vector of additional variables used for imputation
+imp_vars <- c("frailty", "apache.aps", "icu.los.tot.s",
+              "mean.benz.icu", "mean.op.new.icu", "mean.prop.icu")
+
+## Datasets for models at both time points
+cfs_df_3m <- brain.oneobs %>%
+  filter(id %in% pts_3m) %>%
+  dplyr::select(
+    id, one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
+  ) %>%
+  mutate(frailty = as.numeric(str_sub(frailty, 1, 1)))
+
+cfs_df_12m <- brain.oneobs %>%
+  filter(id %in% pts_12m) %>%
+  dplyr::select(
+    id, one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
+  ) %>%
+  mutate(frailty_num = as.numeric(str_sub(frailty, 1, 1)))
+
+## -- String manipulation for imputation, model formulas -----------------------
+## Which variables should *not* be modeled using splines?
+## - imp_ = variables which will be wrapped in I() for imputation; all other
+##          continuous variables will automatically be modeled with splines
+## - model_ = variables which will *not* get rcs()'d in model formula; includes
+##            categoricals
+imp_lin_vars <- c("frailty", "frailty_num.3", "frailty_num.12",
+                  "iqcode.score.e", "adl.e", "faq.e", "edu")
+model_lin_vars <- c("hospdis.home", "sex.pp", imp_lin_vars)
+
+## -- Create formulas for imputation, models -----------------------------------
+## Imputation
+I_replace_regex <- paste0(
+  "(",
+  paste(
+    paste0("^", str_replace_all(imp_lin_vars, fixed("."), fixed("\\.")), "$"),
+    collapse = "|"
+  ),
+  ")"
+)
+
+## Create formula for imputation (same at both time points, except frailty)
+areg_form <- c(model_covars, # imp_vars,
+               "frailty_num.3", "frailty_num.12") %>%
+  str_replace(I_replace_regex, "I\\(\\1)") %>%
+  paste(collapse = " + ") %>%
+  paste("~", .)
+
+areg_form_3m <- areg_form %>%
+  str_replace(fixed("+ I(frailty_num.12)"), "") %>%
+  as.formula
+
+areg_form_12m <- areg_form %>%
+  str_replace(fixed("+ I(frailty_num.3)"), "") %>%
+  as.formula
+
+## Model right-hand sides (same for both time points)
+rcs_replace_regex <- paste0(
+  "(",
+  paste(
+    paste0("^",
+           str_replace_all(
+             setdiff(model_covars, model_lin_vars),
+             fixed("."),
+             fixed("\\.")
+           ),
+           "$"),
+    collapse = "|"
+  ),
+  ")"
+)
+
+mod_rhs <- paste(
+  str_replace(model_covars, rcs_replace_regex, "rcs\\(\\1, 3\\)"),
+  collapse = " + "
+)
+
+```
+
+## Modeling Strategy
+
+CFS scores are integers with a narrow range, yet are normally distributed at each time point (3m: `r spark_cfs_3m`; 12m: `r spark_cfs_12m`). We will use separate linear regression models at each time point to assess the relationships between covariates and frailty. All continuous covariates will be allowed to have a nonlinear relationship with the outcome via restricted cubic splines with three knots.
+
+Because patients with complete data are likely different from patients who survived critical illness but were unable to complete the followup assessment, we will use multiple imputation to account for missing data and reduce the likelihood of bias due to these differences. Specifically, we'll use predictive mean matching with 10 imputations, via the `Hmisc::aregImpute()` and `Hmisc::fit.mult.impute()` functions.
+
+```{r model_impute}
+## -- We'll use the same formula for imputing at 3m, 12m -----------------------
+set.seed(56)
+areg_3m <- aregImpute(areg_form_3m, data = cfs_df_3m, n.impute = 10, nk = 0)
+areg_12m <- aregImpute(areg_form_12m, data = cfs_df_12m, n.impute = 10, nk = 0)
+
+```
+
+```{r model_fit}
+cfs_mod_3m <- fit.mult.impute(
+  as.formula(paste("frailty_num.3 ~", mod_rhs)),
+  fitter = ols,
+  xtrans = areg_3m,
+  data = cfs_df_3m
+)
+
+cfs_mod_12m <- fit.mult.impute(
+  as.formula(paste("frailty_num.12 ~", mod_rhs)),
+  fitter = ols,
+  xtrans = areg_12m,
+  data = cfs_df_12m
+)
+
+```
+
+## Model Assumptions
+
+```{r model_assume}
+lm_diagnostics(cfs_mod_3m, outcomeString = "CFS, 3m", titleString = "3m Frailty")
+lm_diagnostics(cfs_mod_12m, outcomeString = "CFS, 12m", titleString = "12m Frailty")
+
+```
+
+## Model Results
 
 # Trajectory of Frailty over Time
 
