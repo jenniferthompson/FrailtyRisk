@@ -59,14 +59,20 @@ figure_nums(name = "spaghetti", caption = "CSHA Frailty Scores Over Time")
 ```{r data_prep}
 ## -- Create age category, dichotomous discharge location variables ------------
 brain.oneobs <- brain.oneobs %>%
-  mutate(age.cat = factor(ifelse(is.na(age.enroll), NA,
-                          ifelse(age.enroll < 50, 1,
-                          ifelse(age.enroll < 65, 2, 3))),
-                          levels = 1:3,
-                          labels = c("<50", "50-64", ">=65")),
-         hospdis.home = factor(ifelse(is.na(hospdis.loc), NA,
-                               ifelse(hospdis.loc == "Home", 1, 2)),
-                               levels = 1:2, labels = c("Home", "Facility")))
+  mutate(
+    age.cat = factor(ifelse(is.na(age.enroll), NA,
+                     ifelse(age.enroll < 50, 1,
+                     ifelse(age.enroll < 65, 2, 3))),
+                     levels = 1:3, labels = c("<50", "50-64", ">=65")),
+    hospdis.home = factor(ifelse(is.na(hospdis.loc), NA,
+                          ifelse(hospdis.loc == "Home", 1, 2)),
+                          levels = 1:2, labels = c("Home", "Facility")),
+    ## Vent LOS is NA for patients who were never on MV;
+    ## create new version with 0 for these patients
+    vent.los.all.s = ifelse(ever.vent.s == "Never on vent during study period",
+                            0,
+                            vent.los.tot.s)
+  )
 
 ## -- Get IDs of those w/ at least partial assessment data at 3 and/or 12m -----
 fu_outcomes <- c("rbans.global.score", "rbans.attention.tscore",
@@ -260,7 +266,7 @@ spark_cfs_12m <- sparkline(
 ## Vector of model covariates
 model_covars <- c("age.enroll", "edu", "sex.pp", "charlson.score", "adl.e",
                   "faq.e", "mean.modsofa.icu", "del.s.imp", "coma.s.imp",
-                  "icudays.sevseptic.s", "vent.los.tot.s", "hospdis.home")
+                  "icudays.sevseptic.s", "vent.los.all.s", "hospdis.home")
 ## Vector of additional variables used for imputation
 imp_vars <- c("frailty", "apache.aps", "icu.los.tot.s",
               "mean.benz.icu", "mean.op.new.icu", "mean.prop.icu")
@@ -372,11 +378,19 @@ cfs_mod_12m <- fit.mult.impute(
 
 ## Model Assumptions
 
+We graphically verified assumptions for linear regression at both time points, and they are met satisfactorily. While there does appear to be some patterning in residuals, we believe this is due primarily to the integral nature of our outcome, as well as low sample size at the worst levels of frailty among ICU survivors. Residual vs fitted and Q-Q plots are shown in the Details section below.
+
+<details>
+
 ```{r model_assume}
+par(mfrow = c(1, 2))
 lm_diagnostics(cfs_mod_3m, outcomeString = "CFS, 3m", titleString = "3m Frailty")
 lm_diagnostics(cfs_mod_12m, outcomeString = "CFS, 12m", titleString = "12m Frailty")
+par(mfrow = c(1, 1))
 
 ```
+
+</details>
 
 ## Model Results
 
