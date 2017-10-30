@@ -23,8 +23,6 @@ suppressPackageStartupMessages(library(huxtable))
 suppressPackageStartupMessages(library(rms))
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(stringr))
-# suppressPackageStartupMessages(library(forcats))
-# suppressPackageStartupMessages(library(naniar))
 suppressPackageStartupMessages(library(sparkline))
 suppressPackageStartupMessages(library(plotly))
 suppressPackageStartupMessages(library(JTHelpers))
@@ -116,6 +114,7 @@ figure_nums(
 ## -- Create age category, dichotomous discharge location variables ------------
 brain.oneobs <- brain.oneobs %>%
   mutate(
+    frailty_num = as.numeric(str_sub(frailty, 1, 1)),
     age.cat = factor(ifelse(is.na(age.enroll), NA,
                      ifelse(age.enroll < 50, 1,
                      ifelse(age.enroll < 65, 2, 3))),
@@ -180,6 +179,7 @@ We'll describe the cohort in two ways:
 ```{r describe_tables}
 label(brain.oneobs$vent.los.all.s) <- "Days on MV during study period"
 label(brain.oneobs$hospdis.home) <- "Discharge location (home/other)"
+label(brain.oneobs$frailty_num) <- "CSHA CFS at enrollment"
 label(brain.oneobs$frailty) <- "CSHA Frailty Score at enrollment"
 label(brain.oneobs$frailty.fu.3) <- "CSHA Frailty Score, 3m"
 label(brain.oneobs$frailty.fu.12) <- "CSHA Frailty Score, 12m"
@@ -256,7 +256,7 @@ fu_plotdf <- brain.fu %>%
                          levels = 1:2, labels = c("3 Months", "12 Months"))) %>%
   left_join(dplyr::select(brain.oneobs, id, age.cat), by = "id")
 
-ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
+frailty_box <- ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
   facet_wrap(~ timept, nrow = 1) +
   geom_point(colour = "#003D79", alpha = 0.15,
              position = position_jitter(width = 0.25, height = 0.2)) +
@@ -267,6 +267,12 @@ ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
   theme(strip.background = element_rect(fill = "grey90"),
         strip.text = element_text(face = "bold"),
         panel.border = element_rect(colour = "grey80", fill = NA))
+
+pdf("frailty_age.pdf", width = 8, height = 6)
+frailty_box
+dev.off()
+
+frailty_box
 
 ```
 
@@ -282,6 +288,7 @@ Patient characteristics at baseline:
 - Comorbidities, measured via Charlson score
 - Baseline independence, measured via Katz Activities of Daily Living score
 - Baseline disability, measured via Functional Activities Questionnaire
+- Baseline frailty, measured via CSHA Clinical Frailty Score
 
 Characteristics of critical illness:
 
@@ -324,31 +331,31 @@ spark_cfs_12m <- sparkline(
 ## Vector of model covariates
 model_covars <- c("age.enroll", "edu", "sex.pp", "charlson.score", "adl.e",
                   "faq.e", "mean.modsofa.icu", "del.s.imp", "coma.s.imp",
-                  "icudays.sevseptic.s", "vent.los.all.s", "hospdis.home")
+                  "icudays.sevseptic.s", "vent.los.all.s", "hospdis.home",
+                  "frailty_num")
 ## For plot titles (to come), set shorter labels for each element of model_covars
 model_covar_labels <- c("Age", "Education", "Sex", "Charlson", "ADL", "FAQ",
                         "Modified SOFA", "Days delirium", "Days coma",
-                        "Days severe sepsis", "Days MV", "Discharge location")
+                        "Days severe sepsis", "Days MV", "Discharge location",
+                        "Baseline CFS")
 names(model_covar_labels) <- model_covars
 
 ## Vector of additional variables used for imputation
-imp_vars <- c("frailty", "apache.aps", "icu.los.tot.s",
-              "mean.benz.icu", "mean.op.new.icu", "mean.prop.icu")
+imp_vars <- c("apache.aps", "icu.los.tot.s", "mean.benz.icu", "mean.op.new.icu",
+              "mean.prop.icu")
 
 ## Datasets for models at both time points
 cfs_df_3m <- brain.oneobs %>%
   filter(id %in% pts_3m) %>%
   dplyr::select(
     id, one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
-  ) %>%
-  mutate(frailty = as.numeric(str_sub(frailty, 1, 1)))
+  )
 
 cfs_df_12m <- brain.oneobs %>%
   filter(id %in% pts_12m) %>%
   dplyr::select(
     id, one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
-  ) %>%
-  mutate(frailty_num = as.numeric(str_sub(frailty, 1, 1)))
+  )
 
 ## -- String manipulation for imputation, model formulas -----------------------
 ## Which variables should *not* be modeled using splines?
@@ -356,7 +363,7 @@ cfs_df_12m <- brain.oneobs %>%
 ##          continuous variables will automatically be modeled with splines
 ## - model_ = variables which will *not* get rcs()'d in model formula; includes
 ##            categoricals
-imp_lin_vars <- c("frailty", "frailty_num.3", "frailty_num.12",
+imp_lin_vars <- c("frailty_num.3", "frailty_num.12",
                   "iqcode.score.e", "adl.e", "faq.e", "edu")
 model_lin_vars <- c("hospdis.home", "sex.pp", imp_lin_vars)
 
@@ -460,7 +467,7 @@ par(mfrow = c(1, 1))
 
 The CSHA Clinical Frailty Score goes from 1 = best to 7 = worst. Therefore, adjusted differences > 0 are *bad* (higher, worse frailty scores); adjusted differences < 0 are *good* (lower, better frailty scores).
 
-**Overview:** Worse dependence and disability, less education and a *lower* modified mean SOFA score in the ICU are associated with worse frailty at both 3 and 12 months after discharge among ICU survivors. In addition, worse comorbidities and discharge to a facility are associated with worse frailty at 3 months, but not at 12 months; whether this is due to a true easing of effect or dropout of the most frail patients is a matter for further consideration. Among those who survived and were assessed at 12 months, older age is an additional risk factor for worse frailty at that time point.
+**Overview:** After adjusting for all covariates, worse dependence and frailty, less education and a *lower* modified mean SOFA score in the ICU are associated with worse frailty at both 3 and 12 months after discharge among ICU survivors. In addition, discharge to a facility is associated with worse frailty at 3 months, but not at 12 months; whether this is due to a true easing of effect or dropout of the most frail patients is a matter for further consideration. Among those who survived and were assessed at 12 months, older age is an additional risk factor for worse frailty at that time point.
 
 (The association between worse severity of illness in the ICU and a *better* frailty score at followup is surprising; we've had similar conversations about associations with sepsis in other studies. There may be something about patients who survive the worst illnesses which allows them to be more resilient after critical illness.)
 
@@ -512,7 +519,10 @@ print_html(cfs_results_3m)
 Values on Y axis are predicted CSHA Frailty Scores for a given level of the X axis, adjusted to the median or mode of all other covariates.
          
 ```{r plots_3m}
-multiplot(plotlist = cfs_plots_3m, layout = matrix(1:12, nrow = 3, byrow = TRUE))
+multiplot(
+  plotlist = cfs_plots_3m,
+  layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
+)
 
 ```
 
@@ -527,7 +537,10 @@ print_html(cfs_results_12m)
 Values on Y axis are predicted CSHA Frailty Scores for a given level of the X axis, adjusted to the median or mode of all other covariates.
 
 ```{r plots_12m}
-multiplot(plotlist = cfs_plots_12m, layout = matrix(1:12, nrow = 3, byrow = TRUE))
+multiplot(
+  plotlist = cfs_plots_12m,
+  layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
+)
 
 ```
 
