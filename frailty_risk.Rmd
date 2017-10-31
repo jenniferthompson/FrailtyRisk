@@ -99,7 +99,8 @@ table_nums(name = "results_3m", caption = "Risk Factors for 3m Frailty")
 table_nums(name = "results_12m", caption = "Risk Factors for 12m Frailty")
 
 figure_nums <- captioner(prefix = "Figure")
-figure_nums(name = "boxplots", caption = "CSHA Frailty Scores by Age at Enrollment")
+figure_nums(name = "boxplots_time", caption = "CSHA Frailty Scores Over Time")
+figure_nums(name = "boxplots_age", caption = "CSHA Frailty Scores by Age at Enrollment")
 figure_nums(name = "spaghetti", caption = "CSHA Frailty Scores Over Time")
 figure_nums(
   name = "plots_3m", caption = "Predicted CFS Scores by Risk Factor, 3m"
@@ -243,9 +244,7 @@ html(
 
 ```
 
-# Description of Frailty by Age at BRAIN-ICU Enrollment
-
-`r figure_nums("boxplots", display = "cite")` shows raw CFS scores at three and twelve months after hospital discharge by patients' age at BRAIN-ICU admission. Boxplots are overlaid to summarize the data: the middle bar represents the median for each age group; the bottom and top bars represent the 25th and 75th percentiles, respectively. In other words, the middle half of the data is represented by the box.
+# Description of Clinical Frailty Scores
 
 ```{r boxplot_prep}
 ## -- Need one row per patient per time point, with age category included ------
@@ -256,7 +255,68 @@ fu_plotdf <- brain.fu %>%
                          levels = 1:2, labels = c("3 Months", "12 Months"))) %>%
   left_join(dplyr::select(brain.oneobs, id, age.cat), by = "id")
 
-frailty_box <- ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
+## -- Add frailty at baseline --------------------------------------------------
+all_plotdf <- brain.oneobs %>%
+  dplyr::select(id, frailty_num, age.cat) %>%
+  mutate(fu.period = "Enrollment") %>%
+  bind_rows(fu_plotdf %>% dplyr::select(-timept)) %>%
+  mutate(
+    timept = factor(
+      ifelse(fu.period == "Enrollment", 1,
+      ifelse(fu.period == "3 Month", 2, 3)),
+      levels = 1:3, labels = c("Enrollment", "3 Months", "12 Months")
+    )
+  )
+
+## Data prep for barchart: show % at each number
+all_plotdf_bar <- all_plotdf %>%
+  filter(!is.na(frailty_num)) %>%
+  group_by(timept, frailty_num) %>%
+  summarise(frailty_count = n()) %>%
+  ungroup() %>%
+  left_join(all_plotdf %>%
+              filter(!is.na(frailty_num)) %>%
+              group_by(timept) %>%
+              summarise(total_count = n()),
+            by = "timept") %>%
+  mutate(frailty_prop = frailty_count / total_count)
+
+## -- Create plots -------------------------------------------------------------
+## All frailty combined over time
+frailty_time <- ggplot(data = all_plotdf, aes(x = timept, y = frailty_num)) +
+  geom_point(colour = "#003D79", alpha = 0.15,
+             position = position_jitter(width = 0.25, height = 0.2)) +
+  geom_boxplot(colour = "#002346", fill = NA) +
+  scale_y_continuous(name = "CSHA Clinical Frailty Score", breaks = 1:7) +
+  theme_minimal() +
+  theme(panel.border = element_rect(colour = "grey80", fill = NA),
+        axis.text.x = element_text(face = "bold")) +
+  labs(x = NULL)
+
+pdf("frailty_time.pdf", width = 8, height = 6)
+frailty_time
+dev.off()
+
+frailty_hist <- ggplot(data = all_plotdf_bar,
+                       aes(x = frailty_num, y = frailty_prop, fill = timept)) +
+  facet_wrap(~ timept, ncol = 1) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_x_continuous(breaks = 1:7, name = "CSHA Clinical Frailty Score") +
+  scale_y_continuous(name = "Percent of Patients",
+                     breaks = seq(0, 1, 0.1),
+                     labels = paste0(seq(0, 1, 0.1)*100, "%")) +
+  scale_fill_manual(values = c("#003D79", "#48005A", "#598600")) +
+  theme_minimal() +
+  theme(strip.background = element_rect(fill = "grey90", colour = "grey80"),
+        strip.text = element_text(face = "bold"),
+        legend.position = "none")
+
+pdf("frailty_hist.pdf", width = 6, height = 8)
+frailty_hist
+dev.off()
+
+## Frailty at followup by age at enrollment
+frailty_age <- ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
   facet_wrap(~ timept, nrow = 1) +
   geom_point(colour = "#003D79", alpha = 0.15,
              position = position_jitter(width = 0.25, height = 0.2)) +
@@ -264,15 +324,31 @@ frailty_box <- ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
   scale_x_discrete(name = "Age at Enrollment") +
   scale_y_continuous(name = "CSHA Clinical Frailty Score", breaks = 1:7) +
   theme_minimal() +
-  theme(strip.background = element_rect(fill = "grey90"),
+  theme(strip.background = element_rect(fill = "grey90", colour = "grey80"),
         strip.text = element_text(face = "bold"),
         panel.border = element_rect(colour = "grey80", fill = NA))
 
 pdf("frailty_age.pdf", width = 8, height = 6)
-frailty_box
+frailty_age
 dev.off()
 
-frailty_box
+```
+
+## CFS Over Time
+
+`r figure_nums("boxplots_time", display = "cite")` shows raw CFS scores at ICU admission, three and twelve months after hospital discharge.
+
+```{r frailty_time, fig.height = 7, fig.width = 6}
+frailty_hist
+
+```
+
+## CFS by Age at BRAIN-ICU Enrollment
+
+`r figure_nums("boxplots_age", display = "cite")` shows raw CFS scores at three and twelve months after hospital discharge by patients' age at BRAIN-ICU admission. Boxplots are overlaid to summarize the data: the middle bar represents the median for each age group; the bottom and top bars represent the 25th and 75th percentiles, respectively. In other words, the middle half of the data is represented by the box.
+
+```{r frailty_age}
+frailty_age
 
 ```
 
