@@ -59,7 +59,8 @@ predict_cfs_vals <- function(covar, modobj, varlabels){
     scale_y_continuous(limits = c(2.5, 6), breaks = 1:7) +
     theme_minimal() +
     theme(plot.title = element_text(face = "bold", size = 8),
-          axis.text = element_text(size = 7)) +
+          axis.text = element_text(size = 7),
+          panel.border = element_rect(colour = "grey80", fill = NA)) +
     labs(title = varlabels[covar], x = NULL, y = NULL)
   
   ## Add ribbon + line for continuous covariates;
@@ -582,6 +583,8 @@ cfs_plots_12m <- map(
   varlabels = model_covar_labels
 )
 
+names(cfs_plots_3m) <- names(cfs_plots_12m) <- model_covars
+
 ```
 
 ### `r table_nums("results_3m")`
@@ -619,6 +622,58 @@ multiplot(
 )
 
 ```
+
+```{r abstract_plots}
+## -- Create plots for ATS abstract --------------------------------------------
+## Which variables to plot
+ats_plotvars <- c("frailty_num", "adl.e", "edu", "mean.modsofa.icu")
+
+## Create a list of all plots that we want (all above variables at 3, 12m)
+ats_plotlist <- map2(.x = rep(ats_plotvars, 2),
+                     .y = c(rep(list(cfs_plots_3m), length(ats_plotvars)),
+                            rep(list(cfs_plots_12m), length(ats_plotvars))),
+                     .f = ~ pluck(.y, .x))
+
+## Title changes: want main title at the top to say 3/12m;
+## subtitles = variable for 3m column, blank for 12m column
+ats_change_titles <- function(gg, use_sub = c(TRUE, FALSE)){
+  tmp <- gg$labels$title
+  if(use_sub){
+    gg$labels$subtitle <- tmp
+  } else{
+    gg$labels$subtitle <- ""
+  }
+  gg$labels$title <- ""
+  gg
+}
+
+ats_plotlist <- map2(.x = ats_plotlist,
+                     .y = c(rep(TRUE, length(ats_plotvars)),
+                            rep(FALSE, length(ats_plotvars))),
+                     .f = ats_change_titles)
+
+## Manually add 3/12m titles
+ats_plotlist[[1]] <- ats_plotlist[[1]] +
+  scale_x_continuous(breaks = 1:7) +
+  labs(title = "3 Months") +
+  theme(plot.title = element_text(size = 12),
+        plot.subtitle = element_text(size = 9))
+ats_plotlist[[5]] <- ats_plotlist[[5]] +
+  scale_x_continuous(breaks = 1:7) +
+  labs(title = "12 Months") +
+  theme(plot.title = element_text(size = 12),
+        plot.subtitle = element_text(size = 9))
+
+## Create final PDF
+pdf("ats_plots.pdf", height = 7, width = 6)
+multiplot(
+  plotlist = ats_plotlist,
+  layout = matrix(1:8, ncol = 2)
+)
+dev.off()
+
+```
+
 
 # Trajectory of Frailty over Time
 
