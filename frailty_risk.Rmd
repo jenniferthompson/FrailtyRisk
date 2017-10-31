@@ -169,6 +169,24 @@ fu_frailty <- brain.fu %>%
 
 brain.oneobs <- merge(brain.oneobs, fu_frailty, by = "id", all.x = TRUE)
 
+## -- Abstract number check: How many eligible for asmt at each time point? ----
+# ## Want to count all living survivors, even those who withdrew, in denoms
+# all_ids <- brain.oneobs$id
+# out_inhosp <- subset(brain.oneobs,
+#                      (!is.na(died.inhosp) & died.inhosp == "Died in hospital"))$id
+# # |                        (!is.na(studywd) & studywd == "Yes"))$id
+# out_3m <- subset(brain.fu,
+#                  fu.period == "3 Month" &
+#                    !is.na(status) &
+#                    status %in% c("Deceased"))$id #, "Living-Withdrew from the study"))$id
+# in_3m <- setdiff(all_ids, unique(c(out_inhosp, out_3m)))
+# 
+# out_12m <- subset(brain.fu,
+#                   fu.period == "12 Month" &
+#                     !is.na(status) &
+#                     status %in% c("Deceased"))$id #, "Living-Withdrew from the study"))$id
+# in_12m <- setdiff(all_ids, unique(c(out_inhosp, out_3m, out_12m)))
+
 ```
 
 # Description of Cohort
