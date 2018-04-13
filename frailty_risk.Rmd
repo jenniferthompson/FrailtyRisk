@@ -11,7 +11,11 @@ output:
     theme: cosmo
 ---
 
-Using the BRAIN-ICU and MIND-ICU cohorts, which collected the [CSHA Clinical Frailty Score](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1188185/) (CFS) both prior to ICU admission and at three and twelve months following hospital discharge, we will examine several baseline and in-ICU covariates as potential risk factors for long-term frailty.
+Using the BRAIN-ICU and MIND-ICU cohorts, which collected the [CSHA Clinical
+Frailty Score](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1188185/) (CFS) both
+prior to ICU admission and at three and twelve months following hospital
+discharge, we will examine several baseline and in-ICU covariates as potential
+risk factors for long-term frailty.
 
 ```{r setup}
 ## Set default options
@@ -151,16 +155,20 @@ pts_3m <- subset(brainmind.fu, fu.period == "3 Month" & any_fu)$id
 pts_12m <- subset(brainmind.fu, fu.period == "12 Month" & any_fu)$id
 pts_fu <- union(pts_3m, pts_12m)
 
-## -- Create frailty *categories* at 3m, 12m and add to brainmind.oneobs -----------
+## -- Create frailty *categories* at 3m, 12m and add to brainmind.oneobs -------
 brainmind.fu <- brainmind.fu %>%
   mutate(
     ## Numeric version of frailty for later use
     frailty_num = as.numeric(str_sub(frailty.fu, 1, 1)),
-    frailty.cat = factor(ifelse(is.na(frailty_num), NA,
-                         ifelse(frailty_num <= 3, 1,
-                         ifelse(frailty_num == 4, 2, 3))),
-                         levels = 1:3,
-                         labels = c("CFS = 1, 2, 3", "CFS = 4", "CFS = 5, 6, 7"))
+    frailty.cat = factor(
+      case_when(
+        is.na(frailty_num) ~ as.numeric(NA),
+        frailty_num <= 4   ~ 1,
+        TRUE               ~ 2
+      ),
+      levels = 1:2,
+      labels = c("Frail (CFS 1-4)", "Not Frail (CFS 5-7)")
+    )
   )
 
 fu_frailty <- brainmind.fu %>%
@@ -199,8 +207,13 @@ brainmind.oneobs <- merge(brainmind.oneobs, fu_frailty, by = "id", all.x = TRUE)
 
 We'll describe the cohort in two ways:
 
-1. Baseline and in-hospital characteristics of any patient with at least some followup assessment data available at 3- and/or 12-month followup (`r table_nums("describe_all", display = "cite")`)
-1. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", display = "cite")` and `r table_nums("describe_12m", display = "cite")`), stratified by CFS at that time point
+1. Baseline and in-hospital characteristics of any patient with at least some
+followup assessment data available at 3- and/or 12-month followup
+(`r table_nums("describe_all", display = "cite")`)
+1. Baseline and in-hospital characteristics *and* CFS of any patient with CFS
+available at a) 3 months and b) 12 months (`r table_nums("describe_3m", display = "cite")`
+and `r table_nums("describe_12m", display = "cite")`), stratified by CFS at that
+time point
 
 ```{r describe_tables}
 label(brainmind.oneobs$age.enroll) <- "Age at study enrollment"
@@ -367,7 +380,8 @@ dev.off()
 
 ## CFS Over Time
 
-`r figure_nums("boxplots_time", display = "cite")` shows raw CFS scores at ICU admission, three and twelve months after hospital discharge.
+`r figure_nums("boxplots_time", display = "cite")` shows raw CFS scores at ICU
+admission, three and twelve months after hospital discharge.
 
 ```{r frailty_time, fig.height = 7, fig.width = 6}
 frailty_hist
@@ -376,7 +390,12 @@ frailty_hist
 
 ## CFS by Age at BRAIN-ICU Enrollment
 
-`r figure_nums("boxplots_age", display = "cite")` shows raw CFS scores at three and twelve months after hospital discharge by patients' age at BRAIN-ICU admission. Boxplots are overlaid to summarize the data: the middle bar represents the median for each age group; the bottom and top bars represent the 25th and 75th percentiles, respectively. In other words, the middle half of the data is represented by the box.
+`r figure_nums("boxplots_age", display = "cite")` shows raw CFS scores at three
+and twelve months after hospital discharge by patients' age at BRAIN-ICU
+admission. Boxplots are overlaid to summarize the data: the middle bar
+represents the median for each age group; the bottom and top bars represent the
+25th and 75th percentiles, respectively. In other words, the middle half of the
+data is represented by the box.
 
 ```{r frailty_age}
 frailty_age
@@ -385,7 +404,9 @@ frailty_age
 
 # Risk Factors for Frailty after Critical Illness
 
-Among ICU survivors with at least partial cognitive and functional assessment data available at each followup point, we assessed the following covariates for their potential to be risk factors for increased frailty after critical illness:
+Among ICU survivors with at least partial cognitive and functional assessment
+data available at each followup point, we assessed the following covariates for
+their potential to be risk factors for increased frailty after critical illness:
 
 Patient characteristics at baseline:
 
@@ -525,9 +546,22 @@ mod_rhs <- paste(
 
 ## Modeling Strategy
 
-CFS scores are integers with a narrow range, yet are normally distributed at each time point (3m: `r spark_cfs_3m`; 12m: `r spark_cfs_12m`). We will use separate linear regression models at each time point to assess the relationships between covariates and frailty. Continuous covariates with sufficient variability will be allowed to have a nonlinear relationship with the outcome via restricted cubic splines with three knots; this includes age, Charlson, mean modified SOFA, and durations of coma, delirium, MV, and sepsis. There is not sufficient variability in education or Katz ADL and FAQ scores to allow splines; therefore, these covariates are forced to have a linear association with frailty.
+CFS scores are integers with a narrow range, yet are normally distributed at
+each time point (3m: `r spark_cfs_3m`; 12m: `r spark_cfs_12m`). We will use
+separate linear regression models at each time point to assess the relationships
+between covariates and frailty. Continuous covariates with sufficient
+variability will be allowed to have a nonlinear relationship with the outcome
+via restricted cubic splines with three knots; this includes age, Charlson, mean
+modified SOFA, and durations of coma, delirium, MV, and sepsis. There is not
+sufficient variability in education or Katz ADL and FAQ scores to allow splines;
+therefore, these covariates are forced to have a linear association with frailty.
 
-Because patients with complete data are likely different from patients who survived critical illness but were unable to complete the followup assessment, we will use multiple imputation to account for missing data and reduce the likelihood of bias due to these differences. Specifically, we'll use predictive mean matching with 10 imputations, via the `Hmisc::aregImpute()` and `Hmisc::fit.mult.impute()` functions.
+Because patients with complete data are likely different from patients who
+survived critical illness but were unable to complete the followup assessment,
+we will use multiple imputation to account for missing data and reduce the
+likelihood of bias due to these differences. Specifically, we'll use predictive
+mean matching with 10 imputations, via the `Hmisc::aregImpute()` and
+`Hmisc::fit.mult.impute()` functions.
 
 ```{r model_impute}
 ## -- We'll use the same formula for imputing at 3m, 12m -----------------------
@@ -556,7 +590,12 @@ cfs_mod_12m <- fit.mult.impute(
 
 ## Model Assumptions
 
-We graphically verified assumptions for linear regression at both time points, and they are met satisfactorily. While there does appear to be some patterning in residuals, we believe this is due primarily to the integral nature of our outcome, as well as low sample size at the worst levels of frailty among ICU survivors. Residual vs fitted and Q-Q plots are shown in the Details section below.
+We graphically verified assumptions for linear regression at both time points,
+and they are met satisfactorily. While there does appear to be some patterning
+in residuals, we believe this is due primarily to the integral nature of our
+outcome, as well as low sample size at the worst levels of frailty among ICU
+survivors. Residual vs fitted and Q-Q plots are shown in the Details section
+below.
 
 <details>
 
@@ -572,11 +611,24 @@ par(mfrow = c(1, 1))
 
 ## Model Results
 
-The CSHA Clinical Frailty Score goes from 1 = best to 7 = worst. Therefore, adjusted differences > 0 are *bad* (higher, worse frailty scores); adjusted differences < 0 are *good* (lower, better frailty scores).
+The CSHA Clinical Frailty Score goes from 1 = best to 7 = worst. Therefore,
+adjusted differences > 0 are *bad* (higher, worse frailty scores); adjusted
+differences < 0 are *good* (lower, better frailty scores).
 
-**Overview:** After adjusting for all covariates, worse dependence and frailty, less education and a *lower* modified mean SOFA score in the ICU are associated with worse frailty at both 3 and 12 months after discharge among ICU survivors. In addition, discharge to a facility is associated with worse frailty at 3 months, but not at 12 months; whether this is due to a true easing of effect or dropout of the most frail patients is a matter for further consideration. Among those who survived and were assessed at 12 months, older age is an additional risk factor for worse frailty at that time point.
+**Overview:** After adjusting for all covariates, worse dependence and frailty,
+less education and a *lower* modified mean SOFA score in the ICU are associated
+with worse frailty at both 3 and 12 months after discharge among ICU survivors.
+In addition, discharge to a facility is associated with worse frailty at 3
+months, but not at 12 months; whether this is due to a true easing of effect or
+dropout of the most frail patients is a matter for further consideration. Among
+those who survived and were assessed at 12 months, older age is an additional
+risk factor for worse frailty at that time point.
 
-(The association between worse severity of illness in the ICU and a *better* frailty score at followup is surprising; we've had similar conversations about associations with sepsis in other studies. There may be something about patients who survive the worst illnesses which allows them to be more resilient after critical illness.)
+(The association between worse severity of illness in the ICU and a *better*
+frailty score at followup is surprising; we've had similar conversations about
+associations with sepsis in other studies. There may be something about patients
+who survive the worst illnesses which allows them to be more resilient after
+critical illness.)
 
 ```{r model_results}
 ## Set datadist
@@ -625,7 +677,8 @@ print_html(cfs_results_3m)
 
 ### `r figure_nums("plots_3m")`
 
-Values on Y axis are predicted CSHA Frailty Scores for a given level of the X axis, adjusted to the median or mode of all other covariates.
+Values on Y axis are predicted CSHA Frailty Scores for a given level of the X
+axis, adjusted to the median or mode of all other covariates.
          
 ```{r plots_3m}
 multiplot(
@@ -643,7 +696,8 @@ print_html(cfs_results_12m)
 
 ### `r figure_nums("plots_12m")`
 
-Values on Y axis are predicted CSHA Frailty Scores for a given level of the X axis, adjusted to the median or mode of all other covariates.
+Values on Y axis are predicted CSHA Frailty Scores for a given level of the X
+axis, adjusted to the median or mode of all other covariates.
 
 ```{r plots_12m}
 multiplot(
@@ -712,7 +766,9 @@ dev.off()
 
 # Trajectory of Frailty over Time
 
-This spaghetti plot was used to explore data in preparation for mixed effects models and/or latent class analysis. It is left in the report in case it's of interest.
+This spaghetti plot was used to explore data in preparation for mixed effects
+models and/or latent class analysis. It is left in the report in case it's of
+interest.
 
 ```{r describe_frailty}
 ## -- Spaghetti plot for frailty at all three time points ----------------------
@@ -753,7 +809,8 @@ ggplot(data = frailty_data, aes(x = time, y = frailty_num)) +
 
 # Software Details
 
-All analyses were performed using `r R.version$version.string`. Individual package details are noted below.
+All analyses were performed using `r R.version$version.string`. Individual
+package details are noted below.
 
 <details>
 ```{r session_info, results = "markup"}
