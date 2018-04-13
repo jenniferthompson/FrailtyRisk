@@ -11,7 +11,7 @@ output:
     theme: cosmo
 ---
 
-Using the BRAIN-ICU cohort, which collected the [CSHA Clinical Frailty Score](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1188185/) (CFS) both prior to ICU admission and at three and twelve months following hospital discharge, we will examine several baseline and in-ICU covariates as potential risk factors for long-term frailty.
+Using the BRAIN-ICU and MIND-ICU cohorts, which collected the [CSHA Clinical Frailty Score](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1188185/) (CFS) both prior to ICU admission and at three and twelve months following hospital discharge, we will examine several baseline and in-ICU covariates as potential risk factors for long-term frailty.
 
 ```{r setup}
 ## Set default options
@@ -78,8 +78,13 @@ predict_cfs_vals <- function(covar, modobj, varlabels){
   gg
 }
 
-## Analysis data sets are stored in parent directory (actually two levels above)
-load("..//..//braindata.Rdata")
+## Analysis data sets are stored in a different directory
+## This isn't the best way to do this. It's a long story.
+if(Sys.info()["sysname"] == "Linux"){
+  load("/home/thomps23/ICUDelirium/BRAINMIND/CombineData/brainmind_deid.Rdata")
+} else{
+  load("/Volumes/thomps23/ICUDelirium/BRAINMIND/CombineData/brainmind_deid.Rdata")
+}
 
 ```
 
@@ -115,7 +120,7 @@ figure_nums(
 
 ```{r data_prep}
 ## -- Create age category, dichotomous discharge location variables ------------
-brain.oneobs <- brain.oneobs %>%
+brainmind.oneobs <- brainmind.oneobs %>%
   mutate(
     frailty_num = as.numeric(str_sub(frailty, 1, 1)),
     age.cat = factor(ifelse(is.na(age.enroll), NA,
@@ -140,14 +145,14 @@ fu_outcomes <- c("rbans.global.score", "rbans.attention.tscore",
                  "sf36.pcs", "adl.totscore", "faq.totscore", "bdi.totscore",
                  "pcl.totscore", "caps.score", "frailty.fu")
 
-brain.fu$any_fu <- rowSums(!is.na(brain.fu[, fu_outcomes])) > 0
+brainmind.fu$any_fu <- rowSums(!is.na(brainmind.fu[, fu_outcomes])) > 0
 
-pts_3m <- subset(brain.fu, fu.period == "3 Month" & any_fu)$id
-pts_12m <- subset(brain.fu, fu.period == "12 Month" & any_fu)$id
+pts_3m <- subset(brainmind.fu, fu.period == "3 Month" & any_fu)$id
+pts_12m <- subset(brainmind.fu, fu.period == "12 Month" & any_fu)$id
 pts_fu <- union(pts_3m, pts_12m)
 
-## -- Create frailty *categories* at 3m, 12m and add to brain.oneobs -----------
-brain.fu <- brain.fu %>%
+## -- Create frailty *categories* at 3m, 12m and add to brainmind.oneobs -----------
+brainmind.fu <- brainmind.fu %>%
   mutate(
     ## Numeric version of frailty for later use
     frailty_num = as.numeric(str_sub(frailty.fu, 1, 1)),
@@ -158,7 +163,7 @@ brain.fu <- brain.fu %>%
                          labels = c("CFS = 1, 2, 3", "CFS = 4", "CFS = 5, 6, 7"))
   )
 
-fu_frailty <- brain.fu %>%
+fu_frailty <- brainmind.fu %>%
   dplyr::select(id, fu.period, frailty.fu, frailty_num, frailty.cat) %>%
   filter(fu.period %in% c("3 Month", "12 Month")) %>%
   mutate(fu.period = str_extract(fu.period, "^[0-9]+")) %>%
@@ -168,21 +173,21 @@ fu_frailty <- brain.fu %>%
   mutate(frailty_num.3 = as.numeric(frailty_num.3),
          frailty_num.12 = as.numeric(frailty_num.12))
 
-brain.oneobs <- merge(brain.oneobs, fu_frailty, by = "id", all.x = TRUE)
+brainmind.oneobs <- merge(brainmind.oneobs, fu_frailty, by = "id", all.x = TRUE)
 
 ## -- Abstract number check: How many eligible for asmt at each time point? ----
 # ## Want to count all living survivors, even those who withdrew, in denoms
-# all_ids <- brain.oneobs$id
-# out_inhosp <- subset(brain.oneobs,
+# all_ids <- brainmind.oneobs$id
+# out_inhosp <- subset(brainmind.oneobs,
 #                      (!is.na(died.inhosp) & died.inhosp == "Died in hospital"))$id
 # # |                        (!is.na(studywd) & studywd == "Yes"))$id
-# out_3m <- subset(brain.fu,
+# out_3m <- subset(brainmind.fu,
 #                  fu.period == "3 Month" &
 #                    !is.na(status) &
 #                    status %in% c("Deceased"))$id #, "Living-Withdrew from the study"))$id
 # in_3m <- setdiff(all_ids, unique(c(out_inhosp, out_3m)))
 # 
-# out_12m <- subset(brain.fu,
+# out_12m <- subset(brainmind.fu,
 #                   fu.period == "12 Month" &
 #                     !is.na(status) &
 #                     status %in% c("Deceased"))$id #, "Living-Withdrew from the study"))$id
@@ -198,14 +203,20 @@ We'll describe the cohort in two ways:
 1. Baseline and in-hospital characteristics *and* CFS of any patient with CFS available at a) 3 months and b) 12 months (`r table_nums("describe_3m", display = "cite")` and `r table_nums("describe_12m", display = "cite")`), stratified by CFS at that time point
 
 ```{r describe_tables}
-label(brain.oneobs$vent.los.all.s) <- "Days on MV during study period"
-label(brain.oneobs$hospdis.home) <- "Discharge location (home/other)"
-label(brain.oneobs$frailty_num) <- "CSHA CFS at enrollment"
-label(brain.oneobs$frailty) <- "CSHA Frailty Score at enrollment"
-label(brain.oneobs$frailty.fu.3) <- "CSHA Frailty Score, 3m"
-label(brain.oneobs$frailty.fu.12) <- "CSHA Frailty Score, 12m"
-label(brain.oneobs$frailty.cat.3) <- "CFS Category, 3m"
-label(brain.oneobs$frailty.cat.12) <- "CFS Category, 12m"
+label(brainmind.oneobs$age.enroll) <- "Age at study enrollment"
+label(brainmind.oneobs$sex.pp) <- "Sex"
+label(brainmind.oneobs$ever.vent.s) <- "Ever on MV during study period"
+label(brainmind.oneobs$vent.los.all.s) <- "Days on MV during study period"
+label(brainmind.oneobs$ever.sevseptic.s) <- "Ever severely septic during study period"
+label(brainmind.oneobs$ever.del.s) <- "Ever delirious during study period"
+label(brainmind.oneobs$ever.coma.s) <- "Ever comatose during study period"
+label(brainmind.oneobs$hospdis.home) <- "Discharge location (home/other)"
+label(brainmind.oneobs$frailty_num) <- "CSHA CFS at enrollment"
+label(brainmind.oneobs$frailty) <- "CSHA Frailty Score at enrollment"
+label(brainmind.oneobs$frailty.fu.3) <- "CSHA Frailty Score, 3m"
+label(brainmind.oneobs$frailty.fu.12) <- "CSHA Frailty Score, 12m"
+label(brainmind.oneobs$frailty.cat.3) <- "CFS Category, 3m"
+label(brainmind.oneobs$frailty.cat.12) <- "CFS Category, 12m"
 
 describe_vars <- c("age.enroll", "sex.pp", "frailty", "charlson.score",
                    "iqcode.score.e", "faq.e", "adl.e", "num.apache",
@@ -216,7 +227,7 @@ describe_vars <- c("age.enroll", "sex.pp", "frailty", "charlson.score",
 
 describe_all <- summaryM(
   as.formula(paste(paste(describe_vars, collapse = " + "), "~ 1")),
-  data = subset(brain.oneobs, id %in% pts_fu)
+  data = subset(brainmind.oneobs, id %in% pts_fu)
 )
 
 describe_3m <- summaryM(
@@ -224,7 +235,7 @@ describe_3m <- summaryM(
     paste(c(describe_vars, "frailty.fu.3"), collapse = " + "),
     "~ frailty.cat.3"
   )),
-  data = subset(brain.oneobs, id %in% pts_3m & !is.na(frailty.fu.3))
+  data = subset(brainmind.oneobs, id %in% pts_3m & !is.na(frailty.fu.3))
 )
 
 describe_12m <- summaryM(
@@ -232,7 +243,7 @@ describe_12m <- summaryM(
     paste(c(describe_vars, "frailty.fu.12"), collapse = " + "),
     "~ frailty.cat.12"
   )),
-  data = subset(brain.oneobs, id %in% pts_12m & !is.na(frailty.fu.12))
+  data = subset(brainmind.oneobs, id %in% pts_12m & !is.na(frailty.fu.12))
 )
 
 ```
@@ -268,15 +279,15 @@ html(
 
 ```{r boxplot_prep}
 ## -- Need one row per patient per time point, with age category included ------
-fu_plotdf <- brain.fu %>%
+fu_plotdf <- brainmind.fu %>%
   filter(fu.period %in% paste(c(3, 12), "Month")) %>%
   dplyr::select(id, fu.period, frailty_num) %>%
   mutate(timept = factor(ifelse(fu.period == "3 Month", 1, 2),
                          levels = 1:2, labels = c("3 Months", "12 Months"))) %>%
-  left_join(dplyr::select(brain.oneobs, id, age.cat), by = "id")
+  left_join(dplyr::select(brainmind.oneobs, id, age.cat), by = "id")
 
 ## -- Add frailty at baseline --------------------------------------------------
-all_plotdf <- brain.oneobs %>%
+all_plotdf <- brainmind.oneobs %>%
   dplyr::select(id, frailty_num, age.cat) %>%
   mutate(fu.period = "Enrollment") %>%
   bind_rows(fu_plotdf %>% dplyr::select(-timept)) %>%
@@ -397,7 +408,7 @@ Characteristics of critical illness:
 
 ```{r model_prep}
 ## -- Sparklines to show distribution of CFS -----------------------------------
-cfs_dist_3m <- brain.fu %>%
+cfs_dist_3m <- brainmind.fu %>%
   filter(fu.period == "3 Month" & !is.na(frailty_num)) %>%
   group_by(frailty_num) %>%
   summarise(count = n())
@@ -410,7 +421,7 @@ spark_cfs_3m <- sparkline(
   width = 35
 )
 
-cfs_dist_12m <- brain.fu %>%
+cfs_dist_12m <- brainmind.fu %>%
   filter(fu.period == "12 Month" & !is.na(frailty_num)) %>%
   group_by(frailty_num) %>%
   summarise(count = n())
@@ -441,13 +452,13 @@ imp_vars <- c("apache.aps", "icu.los.tot.s", "mean.benz.icu", "mean.op.new.icu",
               "mean.prop.icu")
 
 ## Datasets for models at both time points
-cfs_df_3m <- brain.oneobs %>%
+cfs_df_3m <- brainmind.oneobs %>%
   filter(id %in% pts_3m) %>%
   dplyr::select(
     id, one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
   )
 
-cfs_df_12m <- brain.oneobs %>%
+cfs_df_12m <- brainmind.oneobs %>%
   filter(id %in% pts_12m) %>%
   dplyr::select(
     id, one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
@@ -569,7 +580,7 @@ The CSHA Clinical Frailty Score goes from 1 = best to 7 = worst. Therefore, adju
 
 ```{r model_results}
 ## Set datadist
-dd <- datadist(subset(brain.oneobs, id %in% pts_fu)[, names(cfs_df_3m)])
+dd <- datadist(subset(brainmind.oneobs, id %in% pts_fu)[, names(cfs_df_3m)])
 options(datadist = "dd")
 
 ## Add column names manually - couldn't get huxtable to do this properly/quickly
@@ -579,12 +590,12 @@ cfs_results_colnames <- c(
 
 ## Create results tables for each model
 cfs_results_3m <- cfs_mod_3m %>%
-  rms_model_results(labeldf = brain.oneobs, rndDigits = 2) %>%
+  rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2) %>%
   rbind(cfs_results_colnames, .) %>%
   make_modresults_ht
 
 cfs_results_12m <- cfs_mod_12m %>%
-  rms_model_results(labeldf = brain.oneobs, rndDigits = 2) %>%
+  rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2) %>%
   rbind(cfs_results_colnames, .) %>%
   make_modresults_ht
 
@@ -716,9 +727,9 @@ extract_frailty <- function(df, timept){
 }
 
 frailty_data <- map2_dfr(
-  list(brain.oneobs,
-       subset(brain.fu, fu.period == "3 Month"),
-       subset(brain.fu, fu.period == "12 Month")
+  list(brainmind.oneobs,
+       subset(brainmind.fu, fu.period == "3 Month"),
+       subset(brainmind.fu, fu.period == "12 Month")
   ),
   c(0, 3, 12),
   extract_frailty
