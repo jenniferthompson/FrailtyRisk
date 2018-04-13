@@ -23,7 +23,9 @@ knitr::opts_chunk$set(echo = TRUE, results = "hide", warning = FALSE, message = 
 options(width = 100)
 
 ## Load libraries
+suppressPackageStartupMessages(library(knitr))
 suppressPackageStartupMessages(library(huxtable))
+suppressPackageStartupMessages(library(kableExtra))
 suppressPackageStartupMessages(library(rms))
 suppressPackageStartupMessages(library(tidyverse))
 suppressPackageStartupMessages(library(stringr))
@@ -81,6 +83,9 @@ predict_cfs_vals <- function(covar, modobj, varlabels){
   
   gg
 }
+
+## Helper function: sum all non-missing values
+sum_na <- function(x, ...){ sum(x, na.rm = TRUE, ...) }
 
 ## Analysis data sets are stored in a different directory
 ## This isn't the best way to do this. It's a long story.
@@ -200,6 +205,163 @@ brainmind.oneobs <- merge(brainmind.oneobs, fu_frailty, by = "id", all.x = TRUE)
 #                     !is.na(status) &
 #                     status %in% c("Deceased"))$id #, "Living-Withdrew from the study"))$id
 # in_12m <- setdiff(all_ids, unique(c(out_inhosp, out_3m, out_12m)))
+
+## -- For CONSORT info, get in-hospital, f/u status for each patient -----------
+brainmind.oneobs <- brainmind.oneobs %>%
+  mutate(
+    hosp.status = factor(
+      case_when(
+        ## Patient 14015 withdrew all data, but was not recorded
+        id == 14015 |
+          (!is.na(studywd.amt) &
+           studywd.amt %in% c("2. W/D from Participation and All Data Collected",
+                              "4. N/A Study Staff Withdrew Patient")) ~ 1,
+        !is.na(died.inhosp) & died.inhosp == "Died in hospital" ~ 2,
+        !is.na(studywd) & studywd == "Yes" ~ 3,
+        TRUE ~ 4
+      ),
+      levels = 1:4,
+      labels = c("Withdrew all data", "Died in hospital",
+                 "Withdrew in hospital", "Discharged alive, remained in study")
+    ),
+    three.status = factor(
+      case_when(
+        hosp.status != "Discharged alive, remained in study" ~ as.numeric(NA),
+        !is.na(frailty.fu.3) ~ 5,
+        !is.na(frailty.fu.12) ~ 4,
+        id %in% subset(
+          brainmind.fu,
+          fu.period == "3 Month" & status == "Deceased"
+        )$id ~ 1,
+        id %in% subset(
+          brainmind.fu,
+          fu.period == "3 Month" & status == "Living-Withdrew from the study"
+        )$id ~ 2,
+        TRUE ~ 3
+      ),
+      levels = 1:5,
+      labels = c("Died before 3m followup",
+                 "Withdrew before 3m followup",
+                 "Permanently lost to followup",
+                 "Temporarily lost to followup",
+                 "Assessed at 3m followup")
+    ),
+    twelve.status = factor(
+      case_when(
+        hosp.status != "Discharged alive, remained in study" |
+          (!is.na(three.status) & three.status %in%
+             c("Died before 3m followup", "Withdrew before 3m followup")) ~
+             as.numeric(NA),
+        !is.na(frailty.fu.12) ~ 4,
+        id %in% subset(
+          brainmind.fu,
+          fu.period == "12 Month" & status == "Deceased"
+        )$id ~ 1,
+        id %in% subset(
+          brainmind.fu,
+          fu.period == "12 Month" & status == "Living-Withdrew from the study"
+        )$id ~ 2,
+        TRUE ~ 3
+      ),
+      levels = 1:4,
+      labels = c("Died before 12m followup",
+                 "Withdrew before 12m followup",
+                 "Lost to followup",
+                 "Assessed at 12m followup")
+    )
+  )
+
+```
+
+# Patient Flow
+
+For current purposes, "followup" indicates a CSHA Clinical Frailty Score at the
+specified time point.
+
+Patients were screened between `r min(brain.first.exc, brain.first.enroll)` and
+`r max(c(brain.last.exc, brain.last.enroll, mind.last.exc, mind.last.enroll))`.
+
+```{r prep_consort_table}
+## -- In-hospital section ------------------------------------------------------
+n_wdall <- sum_na(brainmind.oneobs$hosp.status == "Withdrew all data")
+n_eval <- sum_na(brainmind.oneobs$hosp.status != "Withdrew all data")
+n_diedinhosp <- sum_na(brainmind.oneobs$hosp.status == "Died in hospital")
+n_wdinhosp <- sum_na(brainmind.oneobs$hosp.status == "Withdrew in hospital")
+n_dcalive <-
+  sum_na(brainmind.oneobs$hosp.status == "Discharged alive, remained in study")
+
+consort_inhosp <- tribble(
+  ~ current,                             ~ npts,
+  "Enrolled in BRAIN-ICU or MIND-ICU",   nrow(brainmind.oneobs),
+  "   Withdrew all data",                n_wdall,
+  "   Evaluated in hospital",            n_eval,
+  "      Died in hospital",              n_diedinhosp,
+  "      Withdrew in hospital",          n_wdinhosp,
+  "      Discharged, remained in study", n_dcalive
+)
+
+## -- 3m followup section ------------------------------------------------------
+n_died3m <- sum_na(brainmind.oneobs$three.status == "Died before 3m followup")
+n_wd3m <- sum_na(brainmind.oneobs$three.status == "Withdrew before 3m followup")
+n_noassess3m <- sum_na(
+  brainmind.oneobs$three.status %in%
+    c("Permanently lost to followup", "Temporarily lost to followup")
+)
+n_lostperm3m <-
+  sum_na(brainmind.oneobs$three.status == "Permanently lost to followup")
+n_losttemp3m <-
+  sum_na(brainmind.oneobs$three.status == "Temporarily lost to followup")
+n_fu3m <- sum_na(brainmind.oneobs$three.status == "Assessed at 3m followup")
+
+consort_3m <- tribble(
+  ~ current,                            ~ npts,
+    "Discharged, remained in study",      n_dcalive,
+    "   Died before 3m followup",         n_died3m,
+    "   Withdrew before 3m followup",     n_wd3m,
+    "   No 3m assessment",                n_noassess3m,
+    "      Permanently lost to followup", n_lostperm3m,
+    "      Temporarily lost to followup", n_losttemp3m,
+    "   3m followup available",           n_fu3m
+)
+
+## -- 12m followup section -----------------------------------------------------
+n_died12m <- sum_na(brainmind.oneobs$twelve.status == "Died before 12m followup")
+n_wd12m <- sum_na(brainmind.oneobs$twelve.status == "Withdrew before 12m followup")
+n_noassess12m <- sum_na(brainmind.oneobs$twelve.status == "Lost to followup")
+n_fu12m <- sum_na(brainmind.oneobs$twelve.status == "Assessed at 12m followup")
+
+consort_12m <- tribble(
+  ~ current,                         ~ npts,
+    "Eligible for 12m followup",       n_dcalive - (n_died3m + n_wd3m),
+    "   Died before 12m followup",     n_died12m,
+    "   Withdrew before 12m followup", n_wd12m,
+    "   No 12m assessment",            n_noassess12m,
+    "   12m followup available",       n_fu12m
+)
+
+consort_info <- bind_rows(consort_inhosp, consort_3m, consort_12m)
+
+```
+
+```{r print_consort_table}
+consort_info %>%
+  # mutate(
+  #    current = cell_spec(
+  #     current,
+  #     "html",
+  #     color = ifelse(str_detect(current, " lost to followup"), "#999999", "black")
+  #   )
+  # ) %>%
+  kable(
+    format = "html", col.names = c("", "N"), align = c("l", "r"), escape = FALSE
+  ) %>%
+  group_rows("Enrolled Patients", 1, 6) %>%
+  group_rows("Three-Month Follow-Up", 7, 13) %>%
+  group_rows("Twelve-Month Follow-Up", 14, 18) %>%
+  row_spec(row = 11:12, italic = TRUE, color = "#999999") %>%
+  kable_styling(
+    bootstrap_options = "striped", full_width = FALSE, position = "center"
+  )
 
 ```
 
