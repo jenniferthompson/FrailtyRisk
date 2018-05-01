@@ -34,6 +34,7 @@ suppressPackageStartupMessages(library(plotly))
 suppressPackageStartupMessages(library(JTHelpers))
 suppressPackageStartupMessages(library(captioner))
 suppressPackageStartupMessages(library(naniar))
+suppressPackageStartupMessages(library(forcats))
 
 ## -- Function to make huxtable from rms_model_results() df + col headers ------
 make_modresults_ht <- function(resultsdf){
@@ -769,6 +770,108 @@ missing_plot <- missing_df %>%
   labs(y = "Percent Missing", title = "% Covariate Missingness")
 
 missing_plot
+
+```
+
+### Inverse Probability Weighting
+
+A brief outline of the steps for inverse probability weighting (IPW):
+
+1. For all `r n_eval` patients in the eligible cohort, model the outcome of
+having frailty outcome data at 3 and 12 months after discharge using a logistic
+regression model and baseline/in-hospital covariates; using these models,
+calculate predicted probabilities for each time point and all patients.
+1. Calculate a weight for each patient by taking the inverse of this probability.
+1. Examine weights among patients who actually *do* have frailty outcomes at
+each time point. The sum should be equivalent to the total `r n_eval` patients.
+If we have any extremely high weights, we will truncate weights to help with
+model stability.
+1. Fit a model equivalent to the unweighted model in all ways, but weighted by
+these inverse probability weights.
+
+We use the following baseline and in-hospital covariates to model P(in cohort):
+
+- At enrollment:
+    - Age
+    - Years of education
+    - Sex
+    - Charlson comorbidities index
+    - Katz ADL and Functional Activities Questionnaire scores at enrollment
+    - IQCODE at enrollment
+    - Clinical Frailty Score at enrollment
+- In-hospital:
+    - Mean daily modified SOFA score (GCS component removed)
+    - Days of delirium and coma
+    - Days of severe sepsis
+    - Days on mechanical ventilation
+    - Mean daily doses of benzodiazepines, opioids, and propofol while in the ICU
+
+```{r ipw}
+## -- 1. Create indicators for whether patient in 3, 12m cohort ----------------
+brainmind.oneobs <- brainmind.oneobs %>%
+  mutate(
+    cohort_3m = id %in% pts_3m,
+    cohort_12m = id %in% pts_12m
+  )
+
+## -- 2. Setup for IPW models --------------------------------------------------
+## Model righthand side (same for both time points)
+ipw_rhs <- "rcs(age.enroll, 3) + edu + sex.pp + rcs(charlson.score, 3) + adl.e + faq.e + iqcode.score.e + rcs(frailty_num, 3) + rcs(mean.modsofa.icu, 3) + rcs(del.s.imp, 3) + rcs(coma.s.imp, 3) + rcs(icudays.sevseptic.s, 3) + rcs(vent.los.all.s, 3) + rcs(mean.benz.icu, 3) + rcs(mean.op.icu, 3) + rcs(mean.prop.icu, 3)"
+
+## Function for fitting model and extracting probabilities
+prob_cohort <- function(
+  cohort_var,
+  df = brainmind.oneobs,
+  mod_rhs = ipw_rhs
+){
+  ## Final model formula
+  model_formula <- as.formula(
+    paste(cohort_var, mod_rhs, sep = " ~ ")
+  )
+  
+  ## Fit model
+  prob_mod <- lrm(model_formula, data = df)
+  
+  ## Extract predicted probabilities for each patient, take inverse
+  return(1 / predict(prob_mod, type = "fitted"))
+}
+
+## Get weights for each time point
+brainmind.oneobs$wts_3m <- prob_cohort(cohort_var = "cohort_3m")
+brainmind.oneobs$wts_12m <- prob_cohort(cohort_var = "cohort_12m")
+
+## Plot, summarize weights for patients in each cohort at each time point
+wts_df <- brainmind.oneobs %>%
+  dplyr::select(id, starts_with("cohort"), starts_with("wts")) %>%
+  gather(key = tmpkey, value = tmpval, -id) %>%
+  separate(tmpkey, into = c("tmpkey", "timept")) %>%
+  spread(key = tmpkey, value = tmpval) %>%
+  filter(cohort == 1) %>%
+  mutate(timept = forcats::fct_relevel(timept, "3m", "12m"))
+
+wts_hist <- ggplot(data = wts_df, aes(x = wts)) +
+  facet_wrap(~ timept) +
+  geom_histogram()
+
+wts_summary <- wts_df %>%
+  group_by(timept) %>%
+  summarise(sumwts = sum(wts, na.rm = TRUE),
+            maxwt = max(wts, na.rm = TRUE))
+
+```
+
+We have `r sum(!is.na(brainmind.oneobs$wts_3m))` patients with no missingness
+in the variables used to fit the IPW models; our weights sum to
+`r wts_summary %>% filter(timept == "3m") %>% pull(sumwts) %>% round(2)` at 3
+months, with a maximum of
+`r wts_summary %>% filter(timept == "3m") %>% pull(maxwt) %>% round(2)`, and
+`r wts_summary %>% filter(timept == "12m") %>% pull(sumwts) %>% round(2)` at 12
+months, with a maximum of
+`r wts_summary %>% filter(timept == "12m") %>% pull(maxwt) %>% round(2)`. Full
+histograms of the weights are shown below.
+
+```{r wt_plots}
+wts_hist
 
 ```
 
