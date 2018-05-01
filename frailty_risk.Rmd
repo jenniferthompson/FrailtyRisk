@@ -33,6 +33,7 @@ suppressPackageStartupMessages(library(sparkline))
 suppressPackageStartupMessages(library(plotly))
 suppressPackageStartupMessages(library(JTHelpers))
 suppressPackageStartupMessages(library(captioner))
+suppressPackageStartupMessages(library(naniar))
 
 ## -- Function to make huxtable from rms_model_results() df + col headers ------
 make_modresults_ht <- function(resultsdf){
@@ -156,10 +157,6 @@ fu_outcomes <- c("rbans.global.score", "rbans.attention.tscore",
 
 brainmind.fu$any_fu <- rowSums(!is.na(brainmind.fu[, fu_outcomes])) > 0
 
-pts_3m <- subset(brainmind.fu, fu.period == "3 Month" & any_fu)$id
-pts_12m <- subset(brainmind.fu, fu.period == "12 Month" & any_fu)$id
-pts_fu <- union(pts_3m, pts_12m)
-
 ## -- Create frailty *categories* at 3m, 12m and add to brainmind.oneobs -------
 brainmind.fu <- brainmind.fu %>%
   mutate(
@@ -270,6 +267,15 @@ brainmind.oneobs <- brainmind.oneobs %>%
                  "Assessed at 12m followup")
     )
   )
+
+## -- IDs of patients included at 3m, 12m, either ------------------------------
+pts_3m <- brainmind.oneobs %>%
+  filter(three.status == "Assessed at 3m followup", !is.na(frailty.fu.3)) %>%
+  pull(id)
+pts_12m <- brainmind.oneobs %>%
+  filter(twelve.status == "Assessed at 12m followup", !is.na(frailty.fu.12)) %>%
+  pull(id)
+pts_fu <- union(pts_3m, pts_12m)
 
 ```
 
@@ -718,33 +724,62 @@ modified SOFA, and durations of coma, delirium, MV, and sepsis. There is not
 sufficient variability in education or Katz ADL and FAQ scores to allow splines;
 therefore, these covariates are forced to have a linear association with frailty.
 
-Because patients with complete data are likely different from patients who
-survived critical illness but were unable to complete the followup assessment,
-we will use multiple imputation to account for missing data and reduce the
-likelihood of bias due to these differences. Specifically, we'll use predictive
-mean matching with 10 imputations, via the `Hmisc::aregImpute()` and
-`Hmisc::fit.mult.impute()` functions.
+Loss to follow-up, due to either death or loss of contact, is a potential source
+of bias for these long-term outcomes. Therefore, we will model frailty at 3 and
+12 months after discharge in two ways:
 
-```{r model_impute}
-## -- We'll use the same formula for imputing at 3m, 12m -----------------------
-set.seed(56)
-areg_3m <- aregImpute(areg_form_3m, data = cfs_df_3m, n.impute = 10, nk = 0)
-areg_12m <- aregImpute(areg_form_12m, data = cfs_df_12m, n.impute = 10, nk = 0)
+1. **Straightforward analysis of patients with outcomes at each time point**,
+using separate linear regression models for 3- and 12-month frailty
+1. **Models weighted by the inverse probability of having follow-up**, in which
+patients who represent a more "unusual" patient in our follow-up cohort are
+weighted more heavily to account for the potential bias in strategy #1. As one
+possible scenario, patients who are admitted with higher severity of illness and
+more frailty *may* be more likely to die during their ICU stay; in that case,
+those patients who come in with high SOI and comorbidities, but do survive and
+are able to be assessed at long-term follow-up, are weighted more heavily in the
+analysis. More details on weight calculation will be described below.
+
+    *Reference for this approach*: Robins JM, Hernan MA, Brumback B. "Marginal
+    structural models and causal inference in epidemiology." *Epidemiology*,
+    2000 Sep; 11(5): 550-60. [Pubmed link](https://www.ncbi.nlm.nih.gov/pubmed/10955408).
+
+### Handling Missingness
+
+In both sets of models, if >5% of data for any *covariate* is missing, we
+planned to use multiple imputation to reduce bias from missing covariates
+(specifically, predictive mean matching with 25 imputations, via the
+`Hmisc::aregImpute()` and `Hmisc::fit.mult.impute()` functions. However, given
+the extremely low rate of missingness in our covariates among patients with
+frailty outcome data, we will use complete case analysis without worry about
+bias.
+
+```{r model_missingness, fig.width = 7, fig.height = 5}
+missing_df <- bind_rows(cfs_df_3m %>% mutate(fu_period = 1),
+                          cfs_df_12m %>% mutate(fu_period = 2)) %>%
+  mutate(
+    fu_period = factor(fu_period, levels = 1:2, labels = c("3 Months", "12 Months")),
+    frailty_outcome = ifelse(fu_period == "3 Months", frailty_num.3, frailty_num.12)
+  )
+
+missing_plot <- missing_df %>%
+  dplyr::select(one_of(model_covars), frailty_outcome, fu_period) %>%
+  naniar::gg_miss_var(show_pct = TRUE, facet = fu_period) +
+  theme_bw() +
+  theme(strip.text = element_text(hjust = 0, face = "bold")) +
+  labs(y = "Percent Missing", title = "% Covariate Missingness")
+
+missing_plot
 
 ```
 
 ```{r model_fit}
-cfs_mod_3m <- fit.mult.impute(
+cfs_mod_3m_unwtd <- ols(
   as.formula(paste("frailty_num.3 ~", mod_rhs)),
-  fitter = ols,
-  xtrans = areg_3m,
   data = cfs_df_3m
 )
 
-cfs_mod_12m <- fit.mult.impute(
+cfs_mod_12m_unwtd <- ols(
   as.formula(paste("frailty_num.12 ~", mod_rhs)),
-  fitter = ols,
-  xtrans = areg_12m,
   data = cfs_df_12m
 )
 
@@ -763,8 +798,8 @@ below.
 
 ```{r model_assume}
 par(mfrow = c(1, 2))
-lm_diagnostics(cfs_mod_3m, outcomeString = "CFS, 3m", titleString = "3m Frailty")
-lm_diagnostics(cfs_mod_12m, outcomeString = "CFS, 12m", titleString = "12m Frailty")
+lm_diagnostics(cfs_mod_3m_unwtd, outcomeString = "CFS, 3m", titleString = "3m Frailty")
+lm_diagnostics(cfs_mod_12m_unwtd, outcomeString = "CFS, 12m", titleString = "12m Frailty")
 par(mfrow = c(1, 1))
 
 ```
@@ -803,37 +838,37 @@ cfs_results_colnames <- c(
 )
 
 ## Create results tables for each model
-cfs_results_3m <- cfs_mod_3m %>%
+cfs_results_3m_unwtd <- cfs_mod_3m_unwtd %>%
   rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2) %>%
   rbind(cfs_results_colnames, .) %>%
   make_modresults_ht
 
-cfs_results_12m <- cfs_mod_12m %>%
+cfs_results_12m_unwtd <- cfs_mod_12m_unwtd %>%
   rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2) %>%
   rbind(cfs_results_colnames, .) %>%
   make_modresults_ht
 
 ## Get plots for each time point
-cfs_plots_3m <- map(
+cfs_plots_3m_unwtd <- map(
   model_covars,
   .f = predict_cfs_vals,
-  modobj = "cfs_mod_3m",
+  modobj = "cfs_mod_3m_unwtd",
   varlabels = model_covar_labels
 )
-cfs_plots_12m <- map(
+cfs_plots_12m_unwtd <- map(
   model_covars,
   .f = predict_cfs_vals,
-  modobj = "cfs_mod_12m",
+  modobj = "cfs_mod_12m_unwtd",
   varlabels = model_covar_labels
 )
 
-names(cfs_plots_3m) <- names(cfs_plots_12m) <- model_covars
+names(cfs_plots_3m_unwtd) <- names(cfs_plots_12m_unwtd) <- model_covars
 
 ```
 
 ### `r table_nums("results_3m")`
 ```{r results_3m, results = "asis"}
-print_html(cfs_results_3m)
+print_html(cfs_results_3m_unwtd)
 
 ```
 
@@ -844,7 +879,7 @@ axis, adjusted to the median or mode of all other covariates.
          
 ```{r plots_3m}
 multiplot(
-  plotlist = cfs_plots_3m,
+  plotlist = cfs_plots_3m_unwtd,
   layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
 )
 
@@ -852,7 +887,7 @@ multiplot(
 
 ### `r table_nums("results_12m")`
 ```{r results_12m, results = "asis"}
-print_html(cfs_results_12m)
+print_html(cfs_results_12m_unwtd)
 
 ```
 
@@ -863,7 +898,7 @@ axis, adjusted to the median or mode of all other covariates.
 
 ```{r plots_12m}
 multiplot(
-  plotlist = cfs_plots_12m,
+  plotlist = cfs_plots_12m_unwtd,
   layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
 )
 
@@ -876,8 +911,8 @@ ats_plotvars <- c("frailty_num", "adl.e", "edu", "mean.modsofa.icu")
 
 ## Create a list of all plots that we want (all above variables at 3, 12m)
 ats_plotlist <- map2(.x = rep(ats_plotvars, 2),
-                     .y = c(rep(list(cfs_plots_3m), length(ats_plotvars)),
-                            rep(list(cfs_plots_12m), length(ats_plotvars))),
+                     .y = c(rep(list(cfs_plots_3m_unwtd), length(ats_plotvars)),
+                            rep(list(cfs_plots_12m_unwtd), length(ats_plotvars))),
                      .f = ~ pluck(.y, .x))
 
 ## Title changes: want main title at the top to say 3/12m;
