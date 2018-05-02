@@ -836,26 +836,34 @@ prob_cohort <- function(
   probs <- predict(prob_mod, type = "fitted")
   wts <- 1 / probs
   
-  return(list("probs" = probs, "wts" = wts))
+  return(list("mod" = prob_mod, "probs" = probs, "wts" = wts))
 }
 
-probs_3 <- prob_cohort(cohort_var = "cohort_3m")$probs
-probs_12 <- prob_cohort(cohort_var = "cohort_12m")$probs
+probwts_3 <- prob_cohort(cohort_var = "cohort_3m")
+probwts_12 <- prob_cohort(cohort_var = "cohort_12m")
 
 ## Get weights for each time point
-brainmind.oneobs$wts_3m <- prob_cohort(cohort_var = "cohort_3m")$wts
-brainmind.oneobs$wts_12m <- prob_cohort(cohort_var = "cohort_12m")$wts
+brainmind.oneobs$prob_3m <- probwts_3$probs
+brainmind.oneobs$prob_12m <- probwts_12$probs
+brainmind.oneobs$wt_3m <- probwts_3$wts
+brainmind.oneobs$wt_12m <- probwts_12$wts
 
 ## Plot, summarize weights for patients in each cohort at each time point
 wts_df <- brainmind.oneobs %>%
-  dplyr::select(id, starts_with("cohort"), starts_with("wts")) %>%
+  dplyr::select(
+    id, starts_with("cohort"), starts_with("prob"), starts_with("wt")
+  ) %>%
   gather(key = tmpkey, value = tmpval, -id) %>%
   separate(tmpkey, into = c("tmpkey", "timept")) %>%
   spread(key = tmpkey, value = tmpval) %>%
   filter(cohort == 1) %>%
   mutate(timept = forcats::fct_relevel(timept, "3m", "12m"))
 
-wts_hist <- ggplot(data = wts_df, aes(x = wts)) +
+# ## Summarize to check
+# map(levels(wts_df$timept), ~ summary(subset(wts_df, timept == .)$prob))
+# map(levels(wts_df$timept), ~ summary(subset(wts_df, timept == .)$wt))
+
+wts_hist <- ggplot(data = wts_df, aes(x = wt)) +
   facet_wrap(~ timept) +
   geom_histogram() +
   labs(x = "Inverse Probability Weights, Untruncated",
@@ -863,12 +871,12 @@ wts_hist <- ggplot(data = wts_df, aes(x = wts)) +
 
 wts_summary <- wts_df %>%
   group_by(timept) %>%
-  summarise(sumwts = sum(wts, na.rm = TRUE),
-            maxwt = max(wts, na.rm = TRUE))
+  summarise(sumwts = sum(wt, na.rm = TRUE),
+            maxwt = max(wt, na.rm = TRUE))
 
 ```
 
-We have `r sum(!is.na(brainmind.oneobs$wts_3m))` patients with no missingness
+We have `r sum(!is.na(brainmind.oneobs$wt_3m))` patients with no missingness
 in the variables used to fit the IPW models; our weights sum to
 `r wts_summary %>% filter(timept == "3m") %>% pull(sumwts) %>% round(2)` at 3
 months, with a maximum of
@@ -886,9 +894,9 @@ wts_hist
 ```{r model_fit}
 ## -- Add weights to time-specific data.frames and fit models ------------------
 cfs_df_3m <-
-  left_join(cfs_df_3m, dplyr::select(brainmind.oneobs, id, wts_3m), by = "id")
+  left_join(cfs_df_3m, dplyr::select(brainmind.oneobs, id, wt_3m), by = "id")
 cfs_df_12m <-
-  left_join(cfs_df_12m, dplyr::select(brainmind.oneobs, id, wts_12m), by = "id")
+  left_join(cfs_df_12m, dplyr::select(brainmind.oneobs, id, wt_12m), by = "id")
 
 cfs_mod_3m_unwtd <- ols(
   as.formula(paste("frailty_num.3 ~", mod_rhs)),
@@ -897,7 +905,7 @@ cfs_mod_3m_unwtd <- ols(
 cfs_mod_3m_wtd <- ols(
   as.formula(paste("frailty_num.3 ~", mod_rhs)),
   data = cfs_df_3m,
-  weights = wts_3m
+  weights = wt_3m
 )
 
 cfs_mod_12m_unwtd <- ols(
@@ -907,7 +915,7 @@ cfs_mod_12m_unwtd <- ols(
 cfs_mod_12m_wtd <- ols(
   as.formula(paste("frailty_num.12 ~", mod_rhs)),
   data = cfs_df_12m,
-  weights = wts_12m
+  weights = wt_12m
 )
 
 ```
@@ -977,6 +985,10 @@ options(datadist = "dd")
 cfs_results_colnames <- c(
   "Variable", "Ref Level", "Comparison", "Difference (95% CI)", "X^2^", "df", "P"
 )
+
+## Create results tables for each model
+cfs_results_3m_unwtd <- cfs_mod_3m_unwtd %>%
+  rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2)
 
 ## Create results tables for each model
 cfs_results_3m_unwtd <- cfs_mod_3m_unwtd %>%
