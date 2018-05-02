@@ -833,12 +833,18 @@ prob_cohort <- function(
   prob_mod <- lrm(model_formula, data = df)
   
   ## Extract predicted probabilities for each patient, take inverse
-  return(1 / predict(prob_mod, type = "fitted"))
+  probs <- predict(prob_mod, type = "fitted")
+  wts <- 1 / probs
+  
+  return(list("probs" = probs, "wts" = wts))
 }
 
+probs_3 <- prob_cohort(cohort_var = "cohort_3m")$probs
+probs_12 <- prob_cohort(cohort_var = "cohort_12m")$probs
+
 ## Get weights for each time point
-brainmind.oneobs$wts_3m <- prob_cohort(cohort_var = "cohort_3m")
-brainmind.oneobs$wts_12m <- prob_cohort(cohort_var = "cohort_12m")
+brainmind.oneobs$wts_3m <- prob_cohort(cohort_var = "cohort_3m")$wts
+brainmind.oneobs$wts_12m <- prob_cohort(cohort_var = "cohort_12m")$wts
 
 ## Plot, summarize weights for patients in each cohort at each time point
 wts_df <- brainmind.oneobs %>%
@@ -851,7 +857,9 @@ wts_df <- brainmind.oneobs %>%
 
 wts_hist <- ggplot(data = wts_df, aes(x = wts)) +
   facet_wrap(~ timept) +
-  geom_histogram()
+  geom_histogram() +
+  labs(x = "Inverse Probability Weights, Untruncated",
+       y = "Count")
 
 wts_summary <- wts_df %>%
   group_by(timept) %>%
