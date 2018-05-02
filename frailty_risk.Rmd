@@ -36,6 +36,19 @@ suppressPackageStartupMessages(library(captioner))
 suppressPackageStartupMessages(library(naniar))
 suppressPackageStartupMessages(library(forcats))
 
+## -- kable_styling wrapper to ensure all tables are consistently styled -------
+mykablestyle <- function(obj, stripes = FALSE, ...){
+  boptions <- c("hover", "responsive", "condensed", "bordered")
+  if(stripes){ boptions <- c(boptions, "striped") }
+  
+  kable_styling(
+    obj,
+    bootstrap_options = boptions,
+    full_width = FALSE,
+    ...
+  )
+}
+
 ## -- Function to make huxtable from rms_model_results() df + col headers ------
 make_modresults_ht <- function(resultsdf){
   ht <- resultsdf %>%
@@ -961,14 +974,20 @@ The CSHA Clinical Frailty Score goes from 1 = best to 7 = worst. Therefore,
 adjusted differences > 0 are *bad* (higher, worse frailty scores); adjusted
 differences < 0 are *good* (lower, better frailty scores).
 
-**Overview:** After adjusting for all covariates, worse dependence and frailty,
-less education and a *lower* modified mean SOFA score in the ICU are associated
-with worse frailty at both 3 and 12 months after discharge among ICU survivors.
-In addition, discharge to a facility is associated with worse frailty at 3
-months, but not at 12 months; whether this is due to a true easing of effect or
-dropout of the most frail patients is a matter for further consideration. Among
-those who survived and were assessed at 12 months, older age is an additional
-risk factor for worse frailty at that time point.
+**Overview:** After adjusting for all covariates, worse dependence and frailty
+and a *lower* modified mean SOFA score in the ICU are associated with worse
+frailty at both 3 and 12 months after discharge among ICU survivors.
+In addition, more comorbidities, discharge to a facility and less education are
+associated with worse frailty at 3 months, but not at 12 months; whether this is
+due to a true easing of effect or dropout of the most frail patients is a matter
+for further consideration. When weighting by inverse probabilities of follow-up,
+the association between education and 3m frailty weakened a bit, indicating that
+its weakening effect is perhaps due at least in part to dropout. Among those who
+survived and were assessed at 12 months, older age is an additional risk factor
+for worse frailty at that time point.
+
+Generally speaking, results were qualitatively similar in the weighted vs
+unweighted analyses.
 
 (The association between worse severity of illness in the ICU and a *better*
 frailty score at followup is surprising; we've had similar conversations about
@@ -981,26 +1000,112 @@ critical illness.)
 dd <- datadist(subset(brainmind.oneobs, id %in% pts_fu)[, names(cfs_df_3m)])
 options(datadist = "dd")
 
-## Add column names manually - couldn't get huxtable to do this properly/quickly
-cfs_results_colnames <- c(
-  "Variable", "Ref Level", "Comparison", "Difference (95% CI)", "X^2^", "df", "P"
-)
-
-## Create results tables for each model
+## -- Create results tables for each model -------------------------------------
 cfs_results_3m_unwtd <- cfs_mod_3m_unwtd %>%
   rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2)
-
-## Create results tables for each model
-cfs_results_3m_unwtd <- cfs_mod_3m_unwtd %>%
-  rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2) %>%
-  rbind(cfs_results_colnames, .) %>%
-  make_modresults_ht
-
+cfs_results_3m_wtd <- cfs_mod_3m_wtd %>%
+  rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2)
 cfs_results_12m_unwtd <- cfs_mod_12m_unwtd %>%
-  rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2) %>%
-  rbind(cfs_results_colnames, .) %>%
-  make_modresults_ht
+  rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2)
+cfs_results_12m_wtd <- cfs_mod_12m_wtd %>%
+  rms_model_results(labeldf = brainmind.oneobs, rndDigits = 2)
 
+## -- Dataset for plotting -----------------------------------------------------
+cfs_model_plotdata <- bind_rows(
+  cfs_results_3m_unwtd %>% mutate(wtd = 0, timept = 0),
+  cfs_results_3m_wtd %>% mutate(wtd = 1, timept = 0),
+  cfs_results_12m_unwtd %>% mutate(wtd = 0, timept = 1),
+  cfs_results_12m_wtd %>% mutate(wtd = 1, timept = 1)
+) %>%
+  filter(
+    !(label %in% c("All Nonlinear Terms", "Overall Model", "Error", "",
+                   "Model L.R.", "R2", "n"))
+  ) %>%
+  mutate(
+    ## Indicator for weighted vs unweighted analyses
+    wtd = factor(
+      wtd,
+      levels = 0:1,
+      labels = c("Unweighted", "Inverse Probability Weighted")
+    ),
+    ## Indicator for time point
+    timept = factor(timept, levels = 0:1, labels = c("3 Months", "12 Months")),
+    
+    ## Eventual Y axis labels: Variable label + comparison points
+    low = trimws(gsub(".00", "", gsub("0$", "", low), fixed = TRUE)),
+    high = trimws(gsub(".00", "", gsub("0$", "", high), fixed = TRUE)),
+    ## Shorten variable labels
+    label = case_when(
+      label == "Katz ADL score at enrollment" ~
+        sprintf("Baseline Katz ADL\n%s vs %s", high, low),
+      label == "Age at study enrollment" ~ sprintf("Age\n%s vs %s", high, low),
+      label == "Charlson score" ~
+        sprintf("Charlson Comorbidities Index\n%s vs %s", high, low),
+      label == "Days of coma within study period (imputed)" ~
+        sprintf("Days of coma\n%s vs %s", high, low),
+      label == "Days of delirium within study period (imputed)" ~
+        sprintf("Days of delirium\n%s vs %s", high, low),
+      label == "FAQ score at enrollment" ~
+        sprintf("Baseline FAQ\n%s vs %s", high, low),
+      label == "CSHA CFS at enrollment" ~
+        sprintf("Baseline CFS\n%s vs %s", high, low),
+      label == "Discharge location (home/other)" ~
+        "Discharge location\nFacility vs home",
+      label == "Days severely septic in ICU during study period" ~
+        sprintf("Days of severe sepsis\n%s vs %s", high, low),
+      label == "Mean modified SOFA (no CNS) on ICU days during study period" ~
+        sprintf("Mean modified SOFA\n%s vs %s", high, low),
+      label == "Days on MV during study period" ~
+        sprintf("Days on MV\n%s vs %s", high, low),
+      TRUE ~ sprintf("%s\n%s vs %s", label, high, low)
+    )
+  ) %>%
+  ## Separate differences, confidence limits from column est.ci
+  separate(
+    col = est.ci, into = c("pointest", "lcl", "ucl"), sep = " \\(|, |\\)"
+  ) %>%
+  mutate_at(vars(pointest, lcl, ucl), as.numeric)
+
+## -- Visualize results of all four models -------------------------------------
+cfs_model_plot <- ggplot(
+  data = cfs_model_plotdata,
+  ## Variables are ordered by their maximum estimated effect size; could be
+  ## different for both time points
+  aes(x = forcats::fct_reorder(.f = label, .x = pointest, .fun = max),
+      y = pointest, group = wtd, colour = wtd, shape = wtd)) +
+  facet_wrap(~ timept, nrow = 1) +
+  ## Reference line at "no association"
+  geom_hline(yintercept = 0, colour = "grey50", alpha = 0.5, size = 1) +
+  ## Plot point estimate, CI
+  geom_pointrange(
+    aes(ymin = lcl, ymax = ucl), position = position_dodge(width = 0.75)
+  ) +
+  ## geom_pointrange only works with ymin/max; flip it!
+  coord_flip() +
+  ## Make it pretty
+  scale_colour_manual(values = c("#003D79", "#790001")) +
+  scale_shape_manual(values = c(15, 16)) +
+  theme_minimal() +
+  theme(legend.position = "bottom", legend.direction = "horizontal",
+        legend.title = element_blank(),
+        panel.border = element_rect(fill = NA, colour = "grey50"),
+        strip.text = element_text(face = "bold", size = 12)) +
+  labs(
+    x = "",
+    y = "Adjusted Difference in Clinical Frailty Scores (95% CI)"
+  )
+
+```
+
+
+
+
+```{r full_results, fig.height = 7, fig.width = 7}
+cfs_model_plot
+
+```
+
+```{r saving_code}
 ## Get plots for each time point
 cfs_plots_3m_unwtd <- map(
   model_covars,
@@ -1019,9 +1124,68 @@ names(cfs_plots_3m_unwtd) <- names(cfs_plots_12m_unwtd) <- model_covars
 
 ```
 
-### `r table_nums("results_3m")`
-```{r results_3m, results = "asis"}
-print_html(cfs_results_3m_unwtd)
+### Model Results, 3-Month Frailty{.tabset}
+
+#### Unweighted Model
+
+```{r results_3m_unwtd}
+## Add column names manually - couldn't get huxtable to do this properly/quickly
+cfs_results_colnames <- c(
+  "Variable", "Ref Level", "Comparison", "Difference (95% CI)", "X^2^", "df", "P"
+)
+
+cfs_results_3m_unwtd %>%
+  kable(
+    format = "html",
+    col.names = cfs_results_colnames,
+    row.names = FALSE,
+    align = c("l", rep("r", 6))
+  ) %>%
+  mykablestyle()
+
+```
+
+#### Weighted by Inverse Probability of Follow-Up
+
+```{r results_3m_wtd}
+cfs_results_3m_wtd %>%
+  kable(
+    format = "html",
+    col.names = cfs_results_colnames,
+    row.names = FALSE,
+    align = c("l", rep("r", 6))
+  ) %>%
+  mykablestyle()
+
+```
+
+### Model Results, 12-Month Frailty{.tabset}
+
+#### Unweighted Model
+
+```{r results_12m_unwtd}
+cfs_results_12m_unwtd %>%
+  kable(
+    format = "html",
+    col.names = cfs_results_colnames,
+    row.names = FALSE,
+    align = c("l", rep("r", 6))
+  ) %>%
+  mykablestyle()
+
+```
+
+#### Weighted by Inverse Probability of Follow-Up
+
+```{r results_12m_wtd}
+cfs_results_12m_wtd %>%
+  kable(
+    format = "html",
+    col.names = cfs_results_colnames,
+    row.names = FALSE,
+    align = c("l", rep("r", 6))
+  ) %>%
+  mykablestyle()
 
 ```
 
@@ -1035,12 +1199,6 @@ multiplot(
   plotlist = cfs_plots_3m_unwtd,
   layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
 )
-
-```
-
-### `r table_nums("results_12m")`
-```{r results_12m, results = "asis"}
-print_html(cfs_results_12m_unwtd)
 
 ```
 
