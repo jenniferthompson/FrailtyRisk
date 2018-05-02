@@ -884,14 +884,30 @@ wts_hist
 ```
 
 ```{r model_fit}
+## -- Add weights to time-specific data.frames and fit models ------------------
+cfs_df_3m <-
+  left_join(cfs_df_3m, dplyr::select(brainmind.oneobs, id, wts_3m), by = "id")
+cfs_df_12m <-
+  left_join(cfs_df_12m, dplyr::select(brainmind.oneobs, id, wts_12m), by = "id")
+
 cfs_mod_3m_unwtd <- ols(
   as.formula(paste("frailty_num.3 ~", mod_rhs)),
   data = cfs_df_3m
+)
+cfs_mod_3m_wtd <- ols(
+  as.formula(paste("frailty_num.3 ~", mod_rhs)),
+  data = cfs_df_3m,
+  weights = wts_3m
 )
 
 cfs_mod_12m_unwtd <- ols(
   as.formula(paste("frailty_num.12 ~", mod_rhs)),
   data = cfs_df_12m
+)
+cfs_mod_12m_wtd <- ols(
+  as.formula(paste("frailty_num.12 ~", mod_rhs)),
+  data = cfs_df_12m,
+  weights = wts_12m
 )
 
 ```
@@ -908,9 +924,23 @@ below.
 <details>
 
 ```{r model_assume}
-par(mfrow = c(1, 2))
-lm_diagnostics(cfs_mod_3m_unwtd, outcomeString = "CFS, 3m", titleString = "3m Frailty")
-lm_diagnostics(cfs_mod_12m_unwtd, outcomeString = "CFS, 12m", titleString = "12m Frailty")
+par(mfrow = c(2, 2))
+## 3 months
+lm_diagnostics(
+  cfs_mod_3m_unwtd, outcomeString = "CFS, 3m", titleString = "3m, Unweighted"
+)
+lm_diagnostics(
+  cfs_mod_3m_wtd, outcomeString = "CFS, 3m", titleString = "3m, Weighted"
+)
+
+## 12 months
+lm_diagnostics(
+  cfs_mod_12m_unwtd, outcomeString = "CFS, 12m", titleString = "12m, Unweighted"
+)
+lm_diagnostics(
+  cfs_mod_12m_wtd, outcomeString = "CFS, 12m", titleString = "12m, Weighted"
+)
+
 par(mfrow = c(1, 1))
 
 ```
