@@ -757,32 +757,7 @@ imp_lin_vars <- c("frailty_num.3", "frailty_num.12",
                   "iqcode.score.e", "adl.e", "faq.e", "edu")
 model_lin_vars <- c("hospdis.home", "sex.pp", imp_lin_vars)
 
-## -- Create formulas for imputation, models -----------------------------------
-## Imputation
-I_replace_regex <- paste0(
-  "(",
-  paste(
-    paste0("^", str_replace_all(imp_lin_vars, fixed("."), fixed("\\.")), "$"),
-    collapse = "|"
-  ),
-  ")"
-)
-
-## Create formula for imputation (same at both time points, except frailty)
-areg_form <- c(model_covars, # imp_vars,
-               "frailty_num.3", "frailty_num.12") %>%
-  str_replace(I_replace_regex, "I\\(\\1)") %>%
-  paste(collapse = " + ") %>%
-  paste("~", .)
-
-areg_form_3m <- areg_form %>%
-  str_replace(fixed("+ I(frailty_num.12)"), "") %>%
-  as.formula
-
-areg_form_12m <- areg_form %>%
-  str_replace(fixed("+ I(frailty_num.3)"), "") %>%
-  as.formula
-
+## -- Create model formulas ----------------------------------------------------
 ## Model right-hand sides (same for both time points)
 rcs_replace_regex <- paste0(
   "(",
