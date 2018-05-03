@@ -68,16 +68,64 @@ make_modresults_ht <- function(resultsdf){
 ## -- Function to get predicted values of frailty for every covariate ----------
 ## Originally used full variable labels, but that's really long for plot titles
 ## datadist should be set prior to running function
-## Both covar and modobj should be *strings* (not the actual model object)
+## Both covar and mod_xxx should be *strings* (not the actual model object)
+## Must specify at least one of mod_unwtd or mod_wtd, but not necessary to
+##  specify both; this will make it easier if we choose to only plot one of the
+##  weighted/unweighted models
 ## varlabels = named char vector; names=variable names, values=labels for plots
-predict_cfs_vals <- function(covar, modobj, varlabels){
-  predvals <- eval(parse(
-    text = sprintf("Predict(%s, %s = NA) %%>%% as.data.frame", modobj, covar)
-  ))
+## dodge_width = how much to dodge pointrange values
+predict_cfs_vals <- function(
+  covar,
+  mod_unwtd = NULL,
+  mod_wtd = NULL,
+  varlabels,
+  dodge_width = 0.5
+){
+  if(is.null(mod_unwtd) & is.null(mod_wtd)){
+    stop(
+      "At least one of `mod_unwtd` and `mod_wtd` must be specified",
+      call. = FALSE
+    )
+  }
+  if(!(covar %in% names(varlabels))){
+    warning("`covar` is not included in `varlabels`", call. = FALSE)
+  }
+
+  ## -- Get predicted values for unweighted, weighted models -------------------
+  if(!is.null(mod_unwtd)){
+    predvals_unwtd <- eval(parse(
+      text = sprintf(
+        "Predict(%s, %s = NA) %%>%% as.data.frame", mod_unwtd, covar
+      )
+    ))
+    predvals_unwtd$wtd <- 0
+  } else{
+    predvals_unwtd <- NULL
+  }
+  
+  if(!is.null(mod_wtd)){
+    predvals_wtd <- eval(parse(
+      text = sprintf(
+        "Predict(%s, %s = NA) %%>%% as.data.frame", mod_wtd, covar
+      )
+    ))
+    predvals_wtd$wtd <- 1
+  } else{
+    predvals_wtd <- NULL
+  }
+  
+  ## Combine predicted values from unweighted, weighted models
+  predvals <- bind_rows(predvals_unwtd, predvals_wtd) %>%
+    mutate(wtd = factor(wtd, levels = 0:1, labels = c("Unweighted", "IPAW")))
+  
+  ## -- Plot predicted values --------------------------------------------------
+  
+  ## Determine whether to 1) use ribbon or pointrange, 2) group by weighted/not
+  use_pointrange <- length(unique(predvals[, covar])) < 10
+  both_types <- !is.null(mod_unwtd) & !is.null(mod_wtd)
   
   ## Initialize plot
   gg <- ggplot(data = predvals, aes_string(x = covar, y = "yhat")) +
-    # scale_y_continuous(limits = c(2.5, 6), breaks = 1:7) +
     scale_y_continuous(limits = c(1, 7), breaks = c(1, 3, 5, 7)) +
     theme_minimal() +
     theme(plot.title = element_text(face = "bold", size = 8),
@@ -87,13 +135,32 @@ predict_cfs_vals <- function(covar, modobj, varlabels){
   
   ## Add ribbon + line for continuous covariates;
   ## points + CI for categorical (<10 values)
-  if(nrow(predvals) < 10){
-    gg <- gg +
-      geom_pointrange(aes(ymin = lower, ymax = upper), size = 0.2, colour = "#003D74")
+  if(use_pointrange){
+    if(!both_types){
+      gg <- gg +
+        geom_pointrange(
+          aes(ymin = lower, ymax = upper), size = 0.2, colour = "#003D74"
+        )
+    } else{
+      gg <- gg +
+        geom_pointrange(
+          aes(ymin = lower, ymax = upper, colour = wtd),
+          position = position_dodge(dodge_width), size = 0.2
+        ) +
+        scale_colour_manual(name = "", values = c("#003D74", "#790001"))
+    }
   } else{
-    gg <- gg +
-      geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.4, fill = "#003D74") +
-      geom_line(colour = "#003D74")
+    if(!both_types){
+      gg <- gg +
+        geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.4, fill = "#003D74") +
+        geom_line(colour = "#003D74")
+    } else{
+      gg <- gg +
+        geom_ribbon(aes(ymin = lower, ymax = upper, fill = wtd), alpha = 0.4) +
+        geom_line(aes(colour = wtd)) +
+        scale_fill_manual(name = "", values = c("#003D74", "#790001")) +
+        scale_colour_manual(name = "", values = c("#003D74", "#790001"))
+    }
   }
   
   gg
@@ -744,7 +811,7 @@ of bias for these long-term outcomes. Therefore, we will model frailty at 3 and
 
 1. **Straightforward analysis of patients with outcomes at each time point**,
 using separate linear regression models for 3- and 12-month frailty
-1. **Models weighted by the inverse probability of having follow-up**, in which
+1. **Models weighted by the inverse probability of attrition**, in which
 patients who represent a more "unusual" patient in our follow-up cohort are
 weighted more heavily to account for the potential bias in strategy #1. As one
 possible scenario, patients who are admitted with higher severity of illness and
@@ -788,7 +855,8 @@ missing_plot
 
 ### Inverse Probability Weighting
 
-A brief outline of the steps for inverse probability weighting (IPW):
+A brief outline of the steps for inverse probability of attrition weighting
+(IPAW):
 
 1. For all `r n_eval` patients in the eligible cohort, model the outcome of
 having frailty outcome data at 3 and 12 months after discharge using a logistic
@@ -890,7 +958,7 @@ wts_summary <- wts_df %>%
 ```
 
 We have `r sum(!is.na(brainmind.oneobs$wt_3m))` patients with no missingness
-in the variables used to fit the IPW models; our weights sum to
+in the variables used to fit the IPAW models; our weights sum to
 `r wts_summary %>% filter(timept == "3m") %>% pull(sumwts) %>% round(2)` at 3
 months, with a maximum of
 `r wts_summary %>% filter(timept == "3m") %>% pull(maxwt) %>% round(2)`, and
@@ -1097,9 +1165,6 @@ cfs_model_plot <- ggplot(
 
 ```
 
-
-
-
 ```{r full_results, fig.height = 7, fig.width = 7}
 cfs_model_plot
 
@@ -1110,13 +1175,13 @@ cfs_model_plot
 cfs_plots_3m_unwtd <- map(
   model_covars,
   .f = predict_cfs_vals,
-  modobj = "cfs_mod_3m_unwtd",
+  mod_unwtd = "cfs_mod_3m_unwtd",
   varlabels = model_covar_labels
 )
 cfs_plots_12m_unwtd <- map(
   model_covars,
   .f = predict_cfs_vals,
-  modobj = "cfs_mod_12m_unwtd",
+  mod_unwtd = "cfs_mod_12m_unwtd",
   varlabels = model_covar_labels
 )
 
@@ -1145,7 +1210,7 @@ cfs_results_3m_unwtd %>%
 
 ```
 
-#### Weighted by Inverse Probability of Follow-Up
+#### IPAW Model
 
 ```{r results_3m_wtd}
 cfs_results_3m_wtd %>%
@@ -1175,7 +1240,7 @@ cfs_results_12m_unwtd %>%
 
 ```
 
-#### Weighted by Inverse Probability of Follow-Up
+#### IPAW Model
 
 ```{r results_12m_wtd}
 cfs_results_12m_wtd %>%
