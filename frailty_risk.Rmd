@@ -792,6 +792,7 @@ via restricted cubic splines with three knots; this includes age, Charlson, mean
 modified SOFA, and durations of coma, delirium, MV, and sepsis. There is not
 sufficient variability in education or Katz ADL and FAQ scores to allow splines;
 therefore, these covariates are forced to have a linear association with frailty.
+All models will use robust standard errors.
 
 Loss to follow-up, due to either death or loss of contact, is a potential source
 of bias for these long-term outcomes. Therefore, we will model frailty at 3 and
