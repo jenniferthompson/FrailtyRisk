@@ -24,7 +24,6 @@ options(width = 100)
 
 ## Load libraries
 suppressPackageStartupMessages(library(knitr))
-suppressPackageStartupMessages(library(huxtable))
 suppressPackageStartupMessages(library(kableExtra))
 suppressPackageStartupMessages(library(rms))
 suppressPackageStartupMessages(library(tidyverse))
@@ -47,22 +46,6 @@ mykablestyle <- function(obj, stripes = FALSE, ...){
     full_width = FALSE,
     ...
   )
-}
-
-## -- Function to make huxtable from rms_model_results() df + col headers ------
-make_modresults_ht <- function(resultsdf){
-  ht <- resultsdf %>%
-    hux() %>%
-    ## Align variable name to left, all other columns to right
-    set_align(row = everywhere, col = everywhere, byrow = TRUE,
-              value = c("left", rep("right", ncol(resultsdf) - 1))) %>%
-    ## Set p-value column to three decimal places by default
-    set_number_format(row = everywhere, col = 7, value = 3) %>%
-    ## Bold column headers, add line after first row
-    set_bold(row = 1, col = everywhere, TRUE) %>%
-    set_bottom_border(row = 1, col = everywhere, value = 1) %>%
-    ## Table should take up 90% of document width
-    set_width(0.9)
 }
 
 ## -- Function to get predicted values of frailty for every covariate ----------
@@ -989,23 +972,33 @@ cfs_df_12m <-
 
 cfs_mod_3m_unwtd <- ols(
   as.formula(paste("frailty_num.3 ~", mod_rhs)),
-  data = cfs_df_3m
-)
+  data = cfs_df_3m,
+  x = TRUE, y = TRUE
+) %>%
+  robcov()
+
 cfs_mod_3m_wtd <- ols(
   as.formula(paste("frailty_num.3 ~", mod_rhs)),
   data = cfs_df_3m,
-  weights = wt_3m
-)
+  weights = wt_3m,
+  x = TRUE, y = TRUE
+) %>%
+  robcov()
 
 cfs_mod_12m_unwtd <- ols(
   as.formula(paste("frailty_num.12 ~", mod_rhs)),
-  data = cfs_df_12m
-)
+  data = cfs_df_12m,
+  x = TRUE, y = TRUE
+) %>%
+  robcov()
+
 cfs_mod_12m_wtd <- ols(
   as.formula(paste("frailty_num.12 ~", mod_rhs)),
   data = cfs_df_12m,
-  weights = wt_12m
-)
+  weights = wt_12m,
+  x = TRUE, y = TRUE
+) %>%
+  robcov()
 
 ```
 
@@ -1204,7 +1197,7 @@ multiplot(
 #### Unweighted Model
 
 ```{r results_3m_unwtd}
-## Add column names manually - couldn't get huxtable to do this properly/quickly
+## Vector of column names
 cfs_results_colnames <- c(
   "Variable", "Ref Level", "Comparison", "Difference (95% CI)", "X^2^", "df", "P"
 )
