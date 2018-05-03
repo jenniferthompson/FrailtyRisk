@@ -139,7 +139,7 @@ predict_cfs_vals <- function(
     if(!both_types){
       gg <- gg +
         geom_pointrange(
-          aes(ymin = lower, ymax = upper), size = 0.2, colour = "#003D74"
+          aes(ymin = lower, ymax = upper), size = 0.2, colour = "#003D79"
         )
     } else{
       gg <- gg +
@@ -147,19 +147,19 @@ predict_cfs_vals <- function(
           aes(ymin = lower, ymax = upper, colour = wtd),
           position = position_dodge(dodge_width), size = 0.2
         ) +
-        scale_colour_manual(name = "", values = c("#003D74", "#790001"))
+        scale_colour_manual(name = "", values = c("#003D79", "#790001"))
     }
   } else{
     if(!both_types){
       gg <- gg +
-        geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.4, fill = "#003D74") +
-        geom_line(colour = "#003D74")
+        geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.4, fill = "#003D79") +
+        geom_line(colour = "#003D79")
     } else{
       gg <- gg +
         geom_ribbon(aes(ymin = lower, ymax = upper, fill = wtd), alpha = 0.4) +
         geom_line(aes(colour = wtd)) +
-        scale_fill_manual(name = "", values = c("#003D74", "#790001")) +
-        scale_colour_manual(name = "", values = c("#003D74", "#790001"))
+        scale_fill_manual(name = "", values = c("#003D79", "#790001")) +
+        scale_colour_manual(name = "", values = c("#003D79", "#790001"))
     }
   }
   
@@ -686,7 +686,7 @@ cfs_dist_3m <- brainmind.fu %>%
 spark_cfs_3m <- sparkline(
   cfs_dist_3m$count,
   type = 'bar',
-  barColor = "#003D74",
+  barColor = "#003D79",
   elementId = "sparkline-3m",
   width = 35
 )
@@ -699,7 +699,7 @@ cfs_dist_12m <- brainmind.fu %>%
 spark_cfs_12m <- sparkline(
   cfs_dist_12m$count,
   type = 'bar',
-  barColor = "#003D74",
+  barColor = "#003D79",
   elementId = "sparkline-12m",
   width = 35
 )
