@@ -168,6 +168,23 @@ if(Sys.info()["sysname"] == "Linux"){
   load("/Volumes/thomps23/ICUDelirium/BRAINMIND/CombineData/brainmind_deid.Rdata")
 }
 
+## -- Create a site variable based on ID ---------------------------------------
+brainmind.oneobs$site <- with(brainmind.oneobs, {
+  factor(
+    ifelse(id < 12000, 1,
+    ifelse(id < 13000, 2,
+    ifelse(id < 15000, 3,
+    ifelse(id < 16000, 4, 5)))),
+    levels = 1:5, labels = c("VUMC", "ST", "TNV", "SLC", "PS")
+  )
+})
+
+## Indicator for whether patient was MIND-ICU or BRAIN-ICU
+brainmind.oneobs$study <- with(brainmind.oneobs, {
+  factor(as.numeric(site %in% c("TNV", "SLC", "PS")),
+         levels = 0:1, labels = c("BRAIN-ICU", "MIND-ICU"))
+})
+
 ```
 
 ```{r tables_figs}
@@ -470,13 +487,16 @@ label(brainmind.oneobs$frailty.fu.3) <- "CSHA Frailty Score, 3m"
 label(brainmind.oneobs$frailty.fu.12) <- "CSHA Frailty Score, 12m"
 label(brainmind.oneobs$frailty.cat.3) <- "CFS Category, 3m"
 label(brainmind.oneobs$frailty.cat.12) <- "CFS Category, 12m"
+label(brainmind.oneobs$study) <- "Study"
+label(brainmind.oneobs$site) <- "Site"
 
-describe_vars <- c("age.enroll", "sex.pp", "frailty", "charlson.score",
-                   "iqcode.score.e", "faq.e", "adl.e", "num.apache",
-                   "mean.sofa.icu", "ever.vent.s", "vent.los.tot.s.eo",
-                   "ever.sevseptic.s", "icudays.sevseptic.eo", "ever.del.s",
-                   "del.s.imp.eo", "ever.coma.s", "coma.s.imp.eo",
-                   "icu.los.tot.s", "hosp.los.s")
+describe_vars <- c(
+  "study", "site", "age.enroll", "sex.pp", "frailty", "charlson.score",
+  "iqcode.score.e", "faq.e", "adl.e", "num.apache", "mean.sofa.icu",
+  "ever.vent.s", "vent.los.tot.s.eo", "ever.sevseptic.s",
+  "icudays.sevseptic.eo", "ever.del.s", "del.s.imp.eo", "ever.coma.s",
+  "coma.s.imp.eo", "icu.los.tot.s", "hosp.los.s"
+)
 
 describe_all <- summaryM(
   as.formula(paste(paste(describe_vars, collapse = " + "), "~ 1")),
@@ -716,13 +736,15 @@ imp_vars <- c("apache.aps", "icu.los.tot.s", "mean.benz.icu", "mean.op.new.icu",
 cfs_df_3m <- brainmind.oneobs %>%
   filter(id %in% pts_3m) %>%
   dplyr::select(
-    id, one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
+    id, study, site,
+    one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
   )
 
 cfs_df_12m <- brainmind.oneobs %>%
   filter(id %in% pts_12m) %>%
   dplyr::select(
-    id, one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
+    id, study, site,
+    one_of(model_covars), one_of(imp_vars), starts_with("frailty_num")
   )
 
 ## -- String manipulation for imputation, model formulas -----------------------
