@@ -74,12 +74,15 @@ make_modresults_ht <- function(resultsdf){
 ##  weighted/unweighted models
 ## varlabels = named char vector; names=variable names, values=labels for plots
 ## dodge_width = how much to dodge pointrange values
+## include_legend: whether to include legend; takes up too much space when
+##   plotting everything, but will be useful if we pull out separate plots
 predict_cfs_vals <- function(
   covar,
   mod_unwtd = NULL,
   mod_wtd = NULL,
   varlabels,
-  dodge_width = 0.5
+  dodge_width = 0.5,
+  include_legend = FALSE
 ){
   if(is.null(mod_unwtd) & is.null(mod_wtd)){
     stop(
@@ -161,6 +164,11 @@ predict_cfs_vals <- function(
         scale_fill_manual(name = "", values = c("#003D79", "#790001")) +
         scale_colour_manual(name = "", values = c("#003D79", "#790001"))
     }
+  }
+  
+  ## Remove legend if needed
+  if(!include_legend){
+    gg <- gg + theme(legend.position = "none")
   }
   
   gg
@@ -1170,26 +1178,28 @@ cfs_model_plot
 
 ```
 
-```{r saving_code}
-## Get plots for each time point
-cfs_plots_3m_unwtd <- map(
+### Model Results, 3-Month Frailty{.tabset}
+
+#### Visual Results
+
+<font color = "#003D79">**Blue**</font> = unweighted results; <font color = "#790001">**red**</font> = models using IPAW.
+
+```{r plots_3m, fig.height = 7, fig.width = 7}
+cfs_plots_3m <- map(
   model_covars,
   .f = predict_cfs_vals,
   mod_unwtd = "cfs_mod_3m_unwtd",
+  mod_wtd = "cfs_mod_3m_wtd",
   varlabels = model_covar_labels
-)
-cfs_plots_12m_unwtd <- map(
-  model_covars,
-  .f = predict_cfs_vals,
-  mod_unwtd = "cfs_mod_12m_unwtd",
-  varlabels = model_covar_labels
-)
+) %>%
+  set_names(model_covars)
 
-names(cfs_plots_3m_unwtd) <- names(cfs_plots_12m_unwtd) <- model_covars
+multiplot(
+  plotlist = cfs_plots_3m,
+  layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
+)
 
 ```
-
-### Model Results, 3-Month Frailty{.tabset}
 
 #### Unweighted Model
 
@@ -1226,6 +1236,27 @@ cfs_results_3m_wtd %>%
 
 ### Model Results, 12-Month Frailty{.tabset}
 
+#### Visual Results
+
+<font color = "#003D79">**Blue**</font> = unweighted results; <font color = "#790001">**red**</font> = models using IPAW.
+
+```{r plots_12m, fig.height = 7, fig.width = 7}
+cfs_plots_12m <- map(
+  model_covars,
+  .f = predict_cfs_vals,
+  mod_unwtd = "cfs_mod_12m_unwtd",
+  mod_wtd = "cfs_mod_12m_wtd",
+  varlabels = model_covar_labels
+) %>%
+  set_names(model_covars)
+
+multiplot(
+  plotlist = cfs_plots_12m,
+  layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
+)
+
+```
+
 #### Unweighted Model
 
 ```{r results_12m_unwtd}
@@ -1254,34 +1285,26 @@ cfs_results_12m_wtd %>%
 
 ```
 
-### `r figure_nums("plots_3m")`
-
-Values on Y axis are predicted CSHA Frailty Scores for a given level of the X
-axis, adjusted to the median or mode of all other covariates.
-         
-```{r plots_3m}
-multiplot(
-  plotlist = cfs_plots_3m_unwtd,
-  layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
-)
-
-```
-
-### `r figure_nums("plots_12m")`
-
-Values on Y axis are predicted CSHA Frailty Scores for a given level of the X
-axis, adjusted to the median or mode of all other covariates.
-
-```{r plots_12m}
-multiplot(
-  plotlist = cfs_plots_12m_unwtd,
-  layout = matrix(c(1:13, rep(NA, 3)), nrow = 4, byrow = TRUE)
-)
-
-```
-
 ```{r abstract_plots}
 ## -- Create plots for ATS abstract --------------------------------------------
+## These won't look exactly like ATS versions due to addition of MINDICU data
+
+## Plots for each time point, unweighted only
+cfs_plots_3m_unwtd <- map(
+  model_covars,
+  .f = predict_cfs_vals,
+  mod_unwtd = "cfs_mod_3m_unwtd",
+  varlabels = model_covar_labels
+)
+cfs_plots_12m_unwtd <- map(
+  model_covars,
+  .f = predict_cfs_vals,
+  mod_unwtd = "cfs_mod_12m_unwtd",
+  varlabels = model_covar_labels
+)
+
+names(cfs_plots_3m_unwtd) <- names(cfs_plots_12m_unwtd) <- model_covars
+
 ## Which variables to plot
 ats_plotvars <- c("frailty_num", "adl.e", "edu", "mean.modsofa.icu")
 
