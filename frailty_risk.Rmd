@@ -407,6 +407,21 @@ pts_12m <- brainmind.oneobs %>%
   pull(id)
 pts_fu <- union(pts_3m, pts_12m)
 
+## Calculate difference between frailty at each time point
+brainmind.oneobs$cfs_diff_e3 <- with(brainmind.oneobs, {
+  ifelse(id %in% pts_3m, frailty_num.3 - frailty_num, NA)
+})
+brainmind.oneobs$cfs_diff_e12 <- with(brainmind.oneobs, {
+  ifelse(id %in% pts_12m, frailty_num.12 - frailty_num, NA)
+})
+brainmind.oneobs$cfs_diff_312 <- with(brainmind.oneobs, {
+  ifelse(id %in% pts_12m, frailty_num.12 - frailty_num.3, NA)
+})
+
+label(brainmind.oneobs$cfs_diff_e3) <- "3m vs enrollment"
+label(brainmind.oneobs$cfs_diff_e12) <- "12m vs enrollment"
+label(brainmind.oneobs$cfs_diff_312) <- "12m vs 3m"
+
 ```
 
 # Patient Flow
@@ -696,6 +711,20 @@ age_frailty <- ggplot(
 ```
 
 ## CFS Over Time
+
+```{r change_over_time}
+html(
+  summaryM(
+    cfs_diff_e3 + cfs_diff_e12 + cfs_diff_312 ~ 1,
+    continuous = 5,
+    data = brainmind.oneobs
+  ),
+  digits = 2,
+  prmsd = TRUE,
+  caption = "Changes in Clinical Frailty Scores Over Time"
+)
+
+```
 
 `r figure_nums("boxplots_time", display = "cite")` shows raw CFS scores at ICU
 admission, three and twelve months after hospital discharge.
