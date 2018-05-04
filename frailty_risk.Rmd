@@ -55,17 +55,37 @@ mykablestyle <- function(obj, stripes = FALSE, ...){
 ## Must specify at least one of mod_unwtd or mod_wtd, but not necessary to
 ##  specify both; this will make it easier if we choose to only plot one of the
 ##  weighted/unweighted models
-## varlabels = named char vector; names=variable names, values=labels for plots
-## dodge_width = how much to dodge pointrange values
+## varlabels: named char vector; names=variable names, values=labels for plots
+## dodge_width: how much to dodge pointrange values
+## xbreak: how far apart X axis breaks should be
+## ylabel: Y axis label (none by default)
 ## include_legend: whether to include legend; takes up too much space when
 ##   plotting everything, but will be useful if we pull out separate plots
+## title_size: font size for title
+## text_size: font size for axis text
+## linewidth: width for point estimates (continuous)
+## point_size: size for pointranges
+## label_title: whether label should be the title or subtitle
+##   (subtitle used when we're trying to fake faceting by month, but include
+##    continuous and integer covariates)
 predict_cfs_vals <- function(
   covar,
   mod_unwtd = NULL,
   mod_wtd = NULL,
   varlabels,
   dodge_width = 0.5,
-  include_legend = FALSE
+  xbreak = NULL,
+  ylabel = NULL,
+  include_legend = FALSE,
+  ## These all make it easier to do versions for within the report and for
+  ## publication/presentation; defaults to values for within-report
+  title_size = 1.2,
+  subtitle_size = 1,
+  text_size = 0.8,
+  line_size = 0.5,
+  point_size = 0.25,
+  label_title = TRUE,
+  use_title = " "
 ){
   if(is.null(mod_unwtd) & is.null(mod_wtd)){
     stop(
@@ -105,19 +125,40 @@ predict_cfs_vals <- function(
     mutate(wtd = factor(wtd, levels = 0:1, labels = c("Unweighted", "IPAW")))
   
   ## -- Plot predicted values --------------------------------------------------
-  
   ## Determine whether to 1) use ribbon or pointrange, 2) group by weighted/not
   use_pointrange <- length(unique(predvals[, covar])) < 10
   both_types <- !is.null(mod_unwtd) & !is.null(mod_wtd)
   
   ## Initialize plot
   gg <- ggplot(data = predvals, aes_string(x = covar, y = "yhat")) +
-    scale_y_continuous(limits = c(1, 7), breaks = c(1, 3, 5, 7)) +
+    scale_y_continuous(name = ylabel, limits = c(1, 7), breaks = c(1, 3, 5, 7)) +
     theme_minimal() +
-    theme(plot.title = element_text(face = "bold", size = 8),
-          axis.text = element_text(size = 7),
-          panel.border = element_rect(colour = "grey80", fill = NA)) +
-    labs(title = varlabels[covar], x = NULL, y = NULL)
+    theme(plot.title = element_text(face = "bold", size = rel(title_size)),
+          plot.subtitle = element_text(face = "bold", size = rel(subtitle_size)),
+          axis.text = element_text(size = rel(text_size)),
+          panel.border = element_rect(colour = "grey80", fill = NA))
+
+  ## If we're picky about X axis breaks...
+  if(!is.null(xbreak)){
+    if(!inherits(predvals[, covar], "numeric")){
+      stop("`xbreak` must be used with a numeric covariate")
+    }
+    
+    ## X axis limits: floor(min), ceiling(max) of X variable
+    xlims <- c(min(predvals[, covar]), max(predvals[, covar]))
+    
+    gg <- gg +
+      scale_x_continuous(
+        limits = xlims, breaks = seq(xlims[[1]], xlims[[2]], xbreak)
+      )
+  }
+    
+  if(label_title){
+    gg <- gg + labs(title = varlabels[covar], x = NULL, y = NULL)
+  } else{
+    gg <- gg +
+      labs(title = use_title, subtitle = varlabels[covar], x = NULL, y = NULL)
+  }
   
   ## Add ribbon + line for continuous covariates;
   ## points + CI for categorical (<10 values)
@@ -125,13 +166,13 @@ predict_cfs_vals <- function(
     if(!both_types){
       gg <- gg +
         geom_pointrange(
-          aes(ymin = lower, ymax = upper), size = 0.2, colour = "#003D79"
+          aes(ymin = lower, ymax = upper), size = point_size, colour = "#003D79"
         )
     } else{
       gg <- gg +
         geom_pointrange(
           aes(ymin = lower, ymax = upper, colour = wtd),
-          position = position_dodge(dodge_width), size = 0.2
+          position = position_dodge(dodge_width), size = point_size
         ) +
         scale_colour_manual(name = "", values = c("#003D79", "#790001"))
     }
@@ -139,11 +180,11 @@ predict_cfs_vals <- function(
     if(!both_types){
       gg <- gg +
         geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.4, fill = "#003D79") +
-        geom_line(colour = "#003D79")
+        geom_line(colour = "#003D79", size = line_size)
     } else{
       gg <- gg +
         geom_ribbon(aes(ymin = lower, ymax = upper, fill = wtd), alpha = 0.4) +
-        geom_line(aes(colour = wtd)) +
+        geom_line(aes(colour = wtd), size = line_size) +
         scale_fill_manual(name = "", values = c("#003D79", "#790001")) +
         scale_colour_manual(name = "", values = c("#003D79", "#790001"))
     }
@@ -557,11 +598,11 @@ fu_plotdf <- brainmind.fu %>%
   dplyr::select(id, fu.period, frailty_num) %>%
   mutate(timept = factor(ifelse(fu.period == "3 Month", 1, 2),
                          levels = 1:2, labels = c("3 Months", "12 Months"))) %>%
-  left_join(dplyr::select(brainmind.oneobs, id, age.cat), by = "id")
+  left_join(dplyr::select(brainmind.oneobs, id, age.cat, age.enroll), by = "id")
 
 ## -- Add frailty at baseline --------------------------------------------------
 all_plotdf <- brainmind.oneobs %>%
-  dplyr::select(id, frailty_num, age.cat) %>%
+  dplyr::select(id, frailty_num, age.cat, age.enroll) %>%
   mutate(fu.period = "Enrollment") %>%
   bind_rows(fu_plotdf %>% dplyr::select(-timept)) %>%
   mutate(
@@ -629,12 +670,28 @@ frailty_age <- ggplot(data = fu_plotdf, aes(x = age.cat, y = frailty_num)) +
   scale_y_continuous(name = "CSHA Clinical Frailty Score", breaks = 1:7) +
   theme_minimal() +
   theme(strip.background = element_rect(fill = "grey90", colour = "grey80"),
-        strip.text = element_text(face = "bold"),
+        strip.text = element_text(face = "bold", size = 14),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12),
         panel.border = element_rect(colour = "grey80", fill = NA))
 
-pdf("frailty_age.pdf", width = 8, height = 6)
-frailty_age
-dev.off()
+## Flipped version
+age_frailty <- ggplot(
+  data = fu_plotdf,
+  aes(x = frailty_num, y = age.enroll, group = frailty_num)
+) +
+  facet_wrap(~ timept, ncol = 1) +
+  geom_point(colour = "#003D79", alpha = 0.15,
+             position = position_jitter(width = 0.25, height = 0.2)) +
+  geom_boxplot(colour = "#002346", fill = NA, outlier.shape = NA) +
+  scale_y_continuous(name = "Age at Enrollment") +
+  scale_x_continuous(name = "CSHA Clinical Frailty Score", breaks = 1:7) +
+  theme_minimal() +
+  theme(strip.background = element_rect(fill = "grey90", colour = "grey80"),
+        strip.text = element_text(face = "bold", size = 14),
+        axis.title = element_text(face = "bold", size = 14),
+        axis.text = element_text(size = 12),
+        panel.border = element_rect(colour = "grey80", fill = NA))
 
 ```
 
@@ -1006,10 +1063,10 @@ We graphically verified assumptions for linear regression at both time points,
 and they are met satisfactorily. While there does appear to be some patterning
 in residuals, we believe this is due primarily to the integral nature of our
 outcome, as well as low sample size at the worst levels of frailty among ICU
-survivors. Residual vs fitted and Q-Q plots are shown in the Details section
-below.
+survivors. Residual vs fitted and Q-Q plots are shown below.
 
 <details>
+<summary>Visual Assumption Checks for All Models</summary>
 
 ```{r model_assume}
 par(mfrow = c(2, 2))
@@ -1181,7 +1238,8 @@ cfs_plots_3m <- map(
   .f = predict_cfs_vals,
   mod_unwtd = "cfs_mod_3m_unwtd",
   mod_wtd = "cfs_mod_3m_wtd",
-  varlabels = model_covar_labels
+  varlabels = model_covar_labels,
+  title_size = 1
 ) %>%
   set_names(model_covars)
 
@@ -1237,7 +1295,8 @@ cfs_plots_12m <- map(
   .f = predict_cfs_vals,
   mod_unwtd = "cfs_mod_12m_unwtd",
   mod_wtd = "cfs_mod_12m_wtd",
-  varlabels = model_covar_labels
+  varlabels = model_covar_labels,
+  title_size = 1
 ) %>%
   set_names(model_covars)
 
@@ -1350,7 +1409,6 @@ dev.off()
 
 ```
 
-
 # Trajectory of Frailty over Time
 
 This spaghetti plot was used to explore data in preparation for mixed effects
@@ -1391,6 +1449,131 @@ ggplot(data = frailty_data, aes(x = time, y = frailty_num)) +
                      breaks = c(0, 3, 12),
                      labels = c("Baseline", "3M", "12M")) +
   scale_y_continuous(name = "Clinical Frailty Score", breaks = 1:7)
+
+```
+
+# Publication/Poster Figures
+
+This section includes code used to create and save high-resolution versions of
+figures for publication and presentation.
+
+```{r pub_figures}
+## -- List of figures to save: -------------------------------------------------
+## - Boxplot, age categories vs frailty at both follow-up time points
+## - Combined plot for publication: ADL, CFS and SOFA in-hospital vs frailty and
+##    3 and 12m (IPAW models only)
+## - Separate plots for each risk factor for presentations
+
+model_covar_labels_3m <-
+  paste(model_covar_labels, "vs 3-Month CFS") %>% set_names(model_covars)
+model_covar_labels_12m <-
+  paste(model_covar_labels, "vs 12-Month CFS") %>% set_names(model_covars)
+
+rf_xbreaks <- list(10, 2, NULL, 2, 2, 3, 2, 3, 2, 5, 5, NULL, 1) %>%
+  set_names(model_covars)
+
+## -- Separate plots, for presentations, etc -----------------------------------
+rf_plots_3m <- pmap(
+  list(
+    covar = model_covars,
+    xbreak = rf_xbreaks
+  ),
+  predict_cfs_vals,
+  mod_wtd = "cfs_mod_3m_wtd",
+  varlabels = model_covar_labels_3m,
+  title_size = 1.5, text_size = 1.2, line_size = 1.5, point_size = 1.25
+)
+
+rf_plots_12m <- pmap(
+  list(
+    covar = model_covars,
+    xbreak = rf_xbreaks
+  ),
+  predict_cfs_vals,
+  mod_wtd = "cfs_mod_12m_wtd",
+  varlabels = model_covar_labels_12m,
+  title_size = 1.5, text_size = 1.2, line_size = 1.5, point_size = 1.25
+)
+
+## Save both as PDFs, PNGs
+walk2(
+  .x = sprintf(
+    "cfs_%s_%s.pdf",
+    gsub(".", "_", model_covars, fixed = TRUE),
+    c(rep(3, length(model_covars)), rep(12, length(model_covars)))
+  ),
+  .y = c(rf_plots_3m, rf_plots_12m),
+  ggsave,
+  device = "pdf", path = "pubfigures/pdf",
+  width = 7, height = 5, units = "in", dpi = 400
+)
+walk2(
+  .x = sprintf(
+    "cfs_%s_%s.png",
+    gsub(".", "_", model_covars, fixed = TRUE),
+    c(rep(3, length(model_covars)), rep(12, length(model_covars)))
+  ),
+  .y = c(rf_plots_3m, rf_plots_12m),
+  ggsave,
+  device = "png", path = "pubfigures/png",
+  width = 7, height = 5, units = "in", dpi = 400
+)
+
+## -- Combined plot for manuscript: LHS = 3m, RHS = 12m ------------------------
+## Which risk factors to include?
+rf_include_pub <- c("adl.e", "frailty_num", "mean.modsofa.icu")
+rf_ylabels <- c(" ", "Adjusted Clinical Frailty Score", " ")
+
+rf_plots_3m_combine <- pmap(
+  list(
+    covar = rf_include_pub,
+    use_title = c("3 Months\n", "\n", "\n"),
+    xbreak = rf_xbreaks[rf_include_pub],
+    ylabel = rf_ylabels
+  ),
+  predict_cfs_vals,
+  mod_wtd = "cfs_mod_3m_wtd",
+  varlabels = model_covar_labels,
+  label_title = FALSE,
+  title_size = 1.5, subtitle_size = 1.2, text_size = 0.8,
+  line_size = 1.25, point_size = 0.5
+)
+
+rf_plots_12m_combine <- pmap(
+  list(
+    covar = rf_include_pub,
+    use_title = c("12 Months\n", "\n", "\n"),
+    xbreak = rf_xbreaks[rf_include_pub],
+    ylabel = rep(" ",)
+  ),
+  predict_cfs_vals,
+  mod_wtd = "cfs_mod_12m_wtd",
+  varlabels = rep("", length(model_covars)) %>% set_names(model_covars),
+  label_title = FALSE,
+  title_size = 1.5, subtitle_size = 1.2, text_size = 0.8,
+  line_size = 1.25, point_size = 0.5
+)
+
+pdf("pubfigures/pdf/cfs_riskfactors_pub.pdf", width = 6, height = 8)
+multiplot(
+  plotlist = c(rf_plots_3m_combine, rf_plots_12m_combine),
+  layout = matrix(1:6, ncol = 2)
+)
+dev.off()
+
+## -- Save boxplots ------------------------------------------------------------
+pwalk(
+  list(
+    filename = list("frailty_age.pdf", "age_frailty.pdf",
+                    "frailty_age.png", "age_frailty.png"),
+    plot = list(frailty_age, age_frailty, frailty_age, age_frailty),
+    device = c(rep("pdf", 2), rep("png", 2)),
+    path = c(rep("pubfigures/pdf", 2), rep("pubfigures/png", 2)),
+    height = c(5, 7, 5, 7)
+  ),
+  ggsave,
+  width = 7, units = "in", dpi = 400
+)
 
 ```
 
